@@ -1967,7 +1967,7 @@ function processLoader(model, frameState) {
   if (!model._resourcesLoaded || !model._texturesLoaded) {
     // Ensures frames continue to render in requestRender mode while resources are processing
     frameState.afterRender.push(() => true);
-    return model._loader.process(frameState);
+    return model._loader.process(frameState, model.referenceMatrix);
   }
 
   return true;

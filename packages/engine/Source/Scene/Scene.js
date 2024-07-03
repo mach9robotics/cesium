@@ -4099,6 +4099,10 @@ Scene.prototype.drillPickFromRay = function (
   );
 };
 
+Scene.prototype.getVerticalIntersection = function (point, width) {
+  return this._picking.getVerticalIntersection(this, point, width);
+};
+
 /**
  * Initiates an asynchronous {@link Scene#pickFromRay} request using the maximum level of detail for 3D Tilesets
  * regardless of visibility.
