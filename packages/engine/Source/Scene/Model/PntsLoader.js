@@ -769,6 +769,8 @@ function matrixMultbyPointasVec(matrix, vX, vY, vZ) {
   return enu;
 }
 
+PntsLoader.prototype.drillPickWithRay = function (ray) {};
+
 function addPropertyAttributesToPrimitive(
   loader,
   primitive,
