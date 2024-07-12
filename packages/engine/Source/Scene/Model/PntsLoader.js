@@ -586,51 +586,100 @@ function makeStructuralMetadata(parsedContent, customAttributeOutput) {
 // Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
 // l represents the index of the point's left child, and r represents the index of the points right child.
 // If l = 0, then the point does not have a left child, similarly if r = 0 then there is no right child
+// function make2DTree(positions) {
+//   //assert(positions.length % 3 === 0);
+//   const numberOfPoints = positions.length / 3;
+//   const indexedTree = new Int32Array(numberOfPoints * 2);
+//   for (let i = 1; i < numberOfPoints; i++) {
+//     // Root node will always be at index 0
+//     let curNode = 0;
+//     let depth = 1;
+//     while (depth < numberOfPoints) {
+//       const curx = positions[curNode * 3];
+//       const cury = positions[curNode * 3 + 1];
+//       // Split by y
+//       if (depth % 2 === 0) {
+//         if (positions[i * 3 + 1] <= cury) {
+//           if (indexedTree[curNode * 2] === 0) {
+//             indexedTree[curNode * 2] = i;
+//             break;
+//           } else {
+//             curNode = indexedTree[curNode * 2];
+//           }
+//         } else if (indexedTree[curNode * 2 + 1] === 0) {
+//           indexedTree[curNode * 2 + 1] = i;
+//           break;
+//         } else {
+//           curNode = indexedTree[curNode * 2 + 1];
+//         }
+//       }
+//       // Split by x
+//       else if (positions[i * 3] <= curx) {
+//         if (indexedTree[curNode * 2] === 0) {
+//           indexedTree[curNode * 2] = i;
+//           break;
+//         } else {
+//           curNode = indexedTree[curNode * 2];
+//         }
+//       } else if (indexedTree[curNode * 2 + 1] === 0) {
+//         indexedTree[curNode * 2 + 1] = i;
+//         break;
+//       } else {
+//         curNode = indexedTree[curNode * 2 + 1];
+//       }
+//     }
+//     depth++;
+//   }
+//   return indexedTree;
+// }
+
 function make2DTree(positions) {
   //assert(positions.length % 3 === 0);
   const numberOfPoints = positions.length / 3;
   const indexedTree = new Int32Array(numberOfPoints * 2);
   for (let i = 1; i < numberOfPoints; i++) {
     // Root node will always be at index 0
-    let curNode = 0;
-    let depth = 1;
-    while (depth < numberOfPoints) {
-      const curx = positions[curNode * 3];
-      const cury = positions[curNode * 3 + 1];
-      // Split by y
-      if (depth % 2 === 0) {
-        if (positions[i * 3 + 1] <= cury) {
-          if (indexedTree[curNode * 2] === 0) {
-            indexedTree[curNode * 2] = i;
-            break;
-          } else {
-            curNode = indexedTree[curNode * 2];
-          }
-        } else if (indexedTree[curNode * 2 + 1] === 0) {
-          indexedTree[curNode * 2 + 1] = i;
-          break;
-        } else {
-          curNode = indexedTree[curNode * 2 + 1];
-        }
-      }
-      // Split by x
-      else if (positions[i * 3] <= curx) {
-        if (indexedTree[curNode * 2] === 0) {
-          indexedTree[curNode * 2] = i;
-          break;
-        } else {
-          curNode = indexedTree[curNode * 2];
-        }
-      } else if (indexedTree[curNode * 2 + 1] === 0) {
-        indexedTree[curNode * 2 + 1] = i;
-        break;
-      } else {
-        curNode = indexedTree[curNode * 2 + 1];
-      }
-    }
-    depth++;
+    const curNode = 0;
+    const depth = 1;
+    appendToTree(indexedTree, positions, i, curNode, depth);
   }
   return indexedTree;
+}
+
+function appendToTree(indexedTree, positions, pointIndex, curNode, depth) {
+  const curx = positions[curNode * 3];
+  const cury = positions[curNode * 3 + 1];
+  const pointx = positions[pointIndex * 3];
+  const pointy = positions[pointIndex * 3 + 1];
+  if (depth % 2 === 0) {
+    if (pointy <= cury) {
+      if (indexedTree[curNode * 2] === 0) {
+        indexedTree[curNode * 2] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2];
+    } else {
+      if (indexedTree[curNode * 2 + 1] === 0) {
+        indexedTree[curNode * 2 + 1] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2 + 1];
+    }
+    return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
+  } else if (pointx <= curx) {
+    if (indexedTree[curNode * 2] === 0) {
+      indexedTree[curNode * 2] = pointIndex;
+      return;
+    }
+    curNode = indexedTree[curNode * 2];
+  } else {
+    if (indexedTree[curNode * 2 + 1] === 0) {
+      indexedTree[curNode * 2 + 1] = pointIndex;
+      return;
+    }
+    curNode = indexedTree[curNode * 2 + 1];
+  }
+  return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
 }
 
 function makeComponents(loader, context) {
