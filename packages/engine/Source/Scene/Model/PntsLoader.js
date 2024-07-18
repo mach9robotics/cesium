@@ -66,6 +66,7 @@ function PntsLoader(options) {
   this._decodePromise = undefined;
   this._decodedAttributes = undefined;
   this._indexedTree = undefined;
+  this._boxENU = undefined;
   this._transformationMatrix = undefined;
   this._rtcCenter = undefined;
   this._pointsLength = undefined;
@@ -580,59 +581,416 @@ function makeStructuralMetadata(parsedContent, customAttributeOutput) {
   });
 }
 
+function findBoundingBox(positions) {
+  const numberOfPoints = positions.length / 3;
+  let minx = Infinity;
+  let maxx = -Infinity;
+  let miny = Infinity;
+  let maxy = -Infinity;
+  let minz = Infinity;
+  let maxz = -Infinity;
+  for (let i = 0; i < numberOfPoints; i++) {
+    if (minx > positions[3 * i]) {
+      minx = positions[3 * i];
+    }
+    if (maxx < positions[3 * i]) {
+      maxx = positions[3 * i];
+    }
+    if (miny > positions[3 * i + 1]) {
+      miny = positions[3 * i + 1];
+    }
+    if (maxy < positions[3 * i + 1]) {
+      maxy = positions[3 * i + 1];
+    }
+    if (minz > positions[3 * i + 2]) {
+      minz = positions[3 * i + 2];
+    }
+    if (maxz < positions[3 * i + 2]) {
+      maxz = positions[3 * i + 2];
+    }
+  }
+  const ret = new Float64Array(6);
+  ret[0] = minx;
+  ret[1] = maxx;
+  ret[2] = miny;
+  ret[3] = maxy;
+  ret[4] = minz;
+  ret[5] = maxz;
+  return ret;
+}
+
+function make3DTree(positions) {
+  const numberOfPoints = positions.length / 3;
+  const indexedTree = new Int32Array(numberOfPoints * 2);
+  const boundingBox = findBoundingBox(positions);
+  for (let i = 1; i < numberOfPoints; i++) {
+    const curNode = 0;
+    const depth = 1;
+    appendToTree3D(indexedTree, positions, i, curNode, depth, boundingBox);
+  }
+  return [indexedTree, boundingBox];
+}
+
+function appendToTree3D(
+  indexedTree,
+  positions,
+  pointIndex,
+  curNode,
+  depth,
+  boundingBox
+) {
+  const curx = positions[curNode * 3];
+  const cury = positions[curNode * 3 + 1];
+  const curz = positions[curNode * 3 + 2];
+  const pointx = positions[pointIndex * 3];
+  const pointy = positions[pointIndex * 3 + 1];
+  const pointz = positions[pointIndex * 3 + 2];
+  if (depth % 3 === 0) {
+    if (pointx <= curx) {
+      if (indexedTree[curNode * 2] === 0) {
+        indexedTree[curNode * 2] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2];
+    } else {
+      if (indexedTree[curNode * 2 + 1] === 0) {
+        indexedTree[curNode * 2 + 1] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2 + 1];
+    }
+    return appendToTree3D(
+      indexedTree,
+      positions,
+      pointIndex,
+      curNode,
+      depth + 1,
+      boundingBox
+    );
+  } else if (depth % 3 === 1) {
+    if (pointy <= cury) {
+      if (indexedTree[curNode * 2] === 0) {
+        indexedTree[curNode * 2] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2];
+    } else {
+      if (indexedTree[curNode * 2 + 1] === 0) {
+        indexedTree[curNode * 2 + 1] = pointIndex;
+        return;
+      }
+      curNode = indexedTree[curNode * 2 + 1];
+    }
+    return appendToTree3D(
+      indexedTree,
+      positions,
+      pointIndex,
+      curNode,
+      depth + 1,
+      boundingBox
+    );
+  }
+  if (pointz <= curz) {
+    if (indexedTree[curNode * 2] === 0) {
+      indexedTree[curNode * 2] = pointIndex;
+      return;
+    }
+    curNode = indexedTree[curNode * 2];
+  } else {
+    if (indexedTree[curNode * 2 + 1] === 0) {
+      indexedTree[curNode * 2 + 1] = pointIndex;
+      return;
+    }
+    curNode = indexedTree[curNode * 2 + 1];
+  }
+  return appendToTree3D(
+    indexedTree,
+    positions,
+    pointIndex,
+    curNode,
+    depth + 1,
+    boundingBox
+  );
+}
+
+function distance(v1, v2) {
+  return Math.sqrt(
+    (v1[0] - v2[0]) ** 2 + (v1[1] - v2[1]) ** 2 + (v1[2] - v2[2]) ** 2
+  );
+}
+
+function normalize(v) {
+  const newVector = new Float64Array(3);
+  const denom = Math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2);
+  newVector[0] = v[0] / denom;
+  newVector[1] = v[1] / denom;
+  newVector[2] = v[2] / denom;
+  return newVector;
+}
+
+/**
+ * Returns the t-value of the closest point on a line to a point.
+ * @param point
+ * @param a + t*b
+ * @returns t minimizing |point - (a + t*b)|
+ */
+function closestPointOnLineToPoint(point, a, b) {
+  const dir = normalize(b);
+  return (
+    dir[0] * (point[0] - a[0]) +
+    dir[1] * (point[1] - a[1]) +
+    dir[2] * (point[2] - a[2])
+  );
+}
+
+function closestPointOnRayToPoint(point, a, b) {
+  const t = closestPointOnLineToPoint(point, a, b);
+  if (t < 0.0) {
+    return a;
+  }
+  const intersection = new Float64Array(3);
+  intersection[0] = a[0] + t * b[0];
+  intersection[1] = a[1] + t * b[1];
+  intersection[2] = a[2] + t * b[2];
+  return intersection;
+}
+
+function distanceFromRayToPoint(ray, point) {
+  const origin = new Float64Array(3);
+  const dir = new Float64Array(3);
+  origin[0] = ray.origin.x;
+  origin[1] = ray.origin.y;
+  origin[2] = ray.origin.z;
+  dir[0] = ray.direction.x;
+  dir[1] = ray.direction.y;
+  dir[2] = ray.direction.z;
+  return distance(point, closestPointOnRayToPoint(point, origin, dir));
+}
+
+function boundingSphereOfBox(minx, maxx, miny, maxy, minz, maxz) {
+  const center = new Float64Array(3);
+  center[0] = (minx + maxx) / 2;
+  center[1] = (miny + maxy) / 2;
+  center[2] = (minz + maxz) / 2;
+  const vertex = new Float64Array(3);
+  vertex[0] = minx;
+  vertex[1] = miny;
+  vertex[2] = minz;
+  const radius = distance(center, vertex);
+  return [center, radius];
+}
+
+PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
+  const positions = this._enuCoords;
+  const indexedTree = this._3DTree;
+  const box = new Float64Array(6);
+  box[0] = this._boxENU[0];
+  box[1] = this._boxENU[1];
+  box[2] = this._boxENU[2];
+  box[3] = this._boxENU[3];
+  box[4] = this._boxENU[4];
+  box[5] = this._boxENU[5];
+  const curNode = 0;
+  const depth = 1;
+
+  const result = rayIterate(
+    indexedTree,
+    positions,
+    ray,
+    box,
+    curNode,
+    depth,
+    radius
+  );
+  if (!result) {
+    return null;
+  }
+  const ecefTransformationMatrix = Transforms.eastNorthUpToFixedFrame(
+    this._ecefRefPoint
+  );
+  const ecef = matrixMultbyPointasVec(
+    ecefTransformationMatrix,
+    result[0],
+    result[1],
+    result[2]
+  );
+  return new Cartesian3(ecef[0], ecef[1], ecef[2]);
+};
+
+function rayIterate(
+  indexedTree,
+  positions,
+  ray,
+  boundingBox,
+  curNode,
+  depth,
+  radius
+) {
+  const curx = positions[curNode * 3];
+  const cury = positions[curNode * 3 + 1];
+  const curz = positions[curNode * 3 + 2];
+  const curPoint = new Float64Array(3);
+  curPoint[0] = curx;
+  curPoint[1] = cury;
+  curPoint[2] = curz;
+  const sphere = boundingSphereOfBox(
+    boundingBox[0],
+    boundingBox[1],
+    boundingBox[2],
+    boundingBox[3],
+    boundingBox[4],
+    boundingBox[5]
+  );
+  console.log(distanceFromRayToPoint(ray, curPoint), ray, curPoint);
+  if (distanceFromRayToPoint(ray, sphere[0]) > sphere[1] + radius) {
+    return null;
+  }
+  if (distanceFromRayToPoint(ray, curPoint) <= radius) {
+    console.log("ever?");
+    return curPoint;
+  }
+
+  if (depth % 3 === 0) {
+    const maxx = boundingBox[1];
+    boundingBox[1] = curx;
+    if (indexedTree[curNode * 2] !== 0) {
+      const leftBoundingBox = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2],
+        depth + 1,
+        radius
+      );
+      if (leftBoundingBox) {
+        return leftBoundingBox;
+      }
+    }
+    boundingBox[1] = maxx;
+    boundingBox[0] = curx;
+    if (indexedTree[curNode * 2 + 1] !== 0) {
+      const rightBoundingBox = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2 + 1],
+        depth + 1,
+        radius
+      );
+      return rightBoundingBox;
+    }
+    return null;
+  } else if (depth % 3 === 1) {
+    const maxy = boundingBox[3];
+    boundingBox[3] = cury;
+    if (indexedTree[curNode * 2] !== 0) {
+      const leftBoundingBox = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2],
+        depth + 1,
+        radius
+      );
+      if (leftBoundingBox) {
+        return leftBoundingBox;
+      }
+    }
+    boundingBox[3] = maxy;
+    boundingBox[2] = cury;
+    if (indexedTree[curNode * 2 + 1] !== 0) {
+      const rightBoundingBox = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2 + 1],
+        depth + 1,
+        radius
+      );
+      return rightBoundingBox;
+    }
+    return null;
+  }
+  const maxz = boundingBox[5];
+  boundingBox[5] = curz;
+  if (indexedTree[curNode * 2] !== 0) {
+    const leftBoundingBox = rayIterate(
+      indexedTree,
+      positions,
+      ray,
+      boundingBox,
+      indexedTree[curNode * 2],
+      depth + 1,
+      radius
+    );
+    if (leftBoundingBox) {
+      return leftBoundingBox;
+    }
+  }
+  boundingBox[5] = maxz;
+  boundingBox[4] = curz;
+  if (indexedTree[curNode * 2 + 1] !== 0) {
+    const rightBoundingBox = rayIterate(
+      indexedTree,
+      positions,
+      ray,
+      boundingBox,
+      indexedTree[curNode * 2 + 1],
+      depth + 1,
+      radius
+    );
+    return rightBoundingBox;
+  }
+  return null;
+}
+
+// function findClosest3D(indexedTree, positions, point) {
+
+// }
+
+// function treeNavigator3D(indexedTree, positions, point, curNode, depth) {
+//   const curx = positions[curNode*3];
+//   const cury = positions[curNode*3+1];
+//   if (depth % 2 === 0) {
+//       const curPoint = new Cartesian3(positions[curNode*3], positions[curNode*3+1], positions[curNode*3+2]);
+//       if (point.y <= cury) {
+//           if (indexedTree[curNode*2] === 0)
+//               return curPoint;
+//           curNode = indexedTree[curNode*2];
+//       }
+//       else {
+//           if (indexedTree[curNode*2+1] === 0)
+//               return curPoint;
+//           curNode = indexedTree[curNode*2+1];
+//       }
+//       return closerPoint(point, curPoint, findClosestPointinTree(indexedTree, positions, point, curNode, depth+1));
+//   }
+//   else {
+//       const curPoint = new Cartesian3(positions[curNode*3], positions[curNode*3+1], positions[curNode*3+2]);
+//       if (point.x <= curx) {
+//           if (indexedTree[curNode*2] === 0)
+//               return curPoint;
+//           curNode = indexedTree[curNode*2];
+//       }
+//       else {
+//           if (indexedTree[curNode*2+1] === 0)
+//               return curPoint;
+//           curNode = indexedTree[curNode*2+1];
+//       }
+//       return closerPoint(point, curPoint, findClosestPointinTree(indexedTree, positions, point, curNode, depth+1));
+//   }
+// }
+
 // Function to make a 2d tree based on the x y coordinates of points
 // positions should be a Float32 Array in the form [x1, y1, z1, x2, y2, z2, ...]
 // Output will be an Int32 Array in the form [l1, r1, l2, r2, ...]
 // Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
 // l represents the index of the point's left child, and r represents the index of the points right child.
 // If l = 0, then the point does not have a left child, similarly if r = 0 then there is no right child
-// function make2DTree(positions) {
-//   //assert(positions.length % 3 === 0);
-//   const numberOfPoints = positions.length / 3;
-//   const indexedTree = new Int32Array(numberOfPoints * 2);
-//   for (let i = 1; i < numberOfPoints; i++) {
-//     // Root node will always be at index 0
-//     let curNode = 0;
-//     let depth = 1;
-//     while (depth < numberOfPoints) {
-//       const curx = positions[curNode * 3];
-//       const cury = positions[curNode * 3 + 1];
-//       // Split by y
-//       if (depth % 2 === 0) {
-//         if (positions[i * 3 + 1] <= cury) {
-//           if (indexedTree[curNode * 2] === 0) {
-//             indexedTree[curNode * 2] = i;
-//             break;
-//           } else {
-//             curNode = indexedTree[curNode * 2];
-//           }
-//         } else if (indexedTree[curNode * 2 + 1] === 0) {
-//           indexedTree[curNode * 2 + 1] = i;
-//           break;
-//         } else {
-//           curNode = indexedTree[curNode * 2 + 1];
-//         }
-//       }
-//       // Split by x
-//       else if (positions[i * 3] <= curx) {
-//         if (indexedTree[curNode * 2] === 0) {
-//           indexedTree[curNode * 2] = i;
-//           break;
-//         } else {
-//           curNode = indexedTree[curNode * 2];
-//         }
-//       } else if (indexedTree[curNode * 2 + 1] === 0) {
-//         indexedTree[curNode * 2 + 1] = i;
-//         break;
-//       } else {
-//         curNode = indexedTree[curNode * 2 + 1];
-//       }
-//     }
-//     depth++;
-//   }
-//   return indexedTree;
-// }
-
 function make2DTree(positions) {
   //assert(positions.length % 3 === 0);
   const numberOfPoints = positions.length / 3;
@@ -798,6 +1156,9 @@ function makeComponents(loader, context) {
     loader._enuCoords[3 * i + 2] = enuCoords[2];
   }
   loader._indexedTree = make2DTree(loader._enuCoords);
+  const treeComponents = make3DTree(loader._enuCoords);
+  loader._3DTree = treeComponents[0];
+  loader._boxENU = treeComponents[1];
   loader._parsedContent = undefined;
   loader._arrayBuffer = undefined;
 }

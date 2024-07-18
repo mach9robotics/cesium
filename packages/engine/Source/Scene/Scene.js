@@ -70,6 +70,7 @@ import SunPostProcess from "./SunPostProcess.js";
 import TweenCollection from "./TweenCollection.js";
 import View from "./View.js";
 import DebugInspector from "./DebugInspector.js";
+import Ray from "../Core/Ray.js";
 
 const requestRenderAfterFrame = function (scene) {
   return function () {
@@ -4097,6 +4098,102 @@ Scene.prototype.drillPickFromRay = function (
     objectsToExclude,
     width
   );
+};
+
+function ecefToEnu(ref, point) {
+  const ecefFromEnu = Transforms.eastNorthUpToFixedFrame(ref);
+  const enuFromEcef = Matrix4.inverseTransformation(ecefFromEnu, new Matrix4());
+  const transformed = Matrix4.multiplyByPointAsVector(
+    enuFromEcef,
+    Cartesian3.subtract(point, ref, new Cartesian3()),
+    new Cartesian3()
+  );
+  return transformed;
+}
+
+function getRayIntersectionWithTile(tile, ray, radius) {
+  if (!tile.content) {
+    return null;
+  }
+  const origin = ecefToEnu(
+    tile._content._model._loader._ecefRefPoint,
+    ray.origin
+  );
+  const direction = ecefToEnu(
+    tile.content._model._loader._ecefRefPoint,
+    ray.direction
+  );
+  const enuRay = new Ray(origin, direction);
+  const result = tile.content._model._loader.findPointsWithinRadiusOfRay(
+    enuRay,
+    radius
+  );
+  return result;
+}
+
+function rayIntersection(tileset, ray, radius) {
+  for (const tile of tileset) {
+    const intersection = getRayIntersectionWithTile(tile, ray, radius);
+    if (intersection) {
+      return intersection;
+    }
+  }
+  return undefined;
+}
+
+function closestPointOnLineToPoint(point, line) {
+  const dir = Cartesian3.normalize(line.b, new Cartesian3());
+  const rayToCenter = Cartesian3.subtract(point, line.a, new Cartesian3());
+  const t = Cartesian3.dot(rayToCenter, dir);
+  return t;
+}
+
+function closestPointOnRayToPoint(ray, point) {
+  const dir = Cartesian3.normalize(ray.direction, new Cartesian3());
+  const t = closestPointOnLineToPoint(point, {
+    a: ray.origin,
+    b: dir,
+  });
+
+  // If negative, the point is behind the ray origin
+  if (t < 0.0) {
+    return ray.origin;
+  }
+
+  const intersection = Cartesian3.add(
+    ray.origin,
+    Cartesian3.multiplyByScalar(dir, t, new Cartesian3()),
+    new Cartesian3()
+  );
+  return intersection;
+}
+
+/**
+ * Find the distance between a point and the closest point on a ray.
+ */
+function distanceFromRayToPoint(ray, point) {
+  return Cartesian3.distance(point, closestPointOnRayToPoint(ray, point));
+}
+
+function rayIntersectWithSphere(ray, radius, sphere) {
+  return distanceFromRayToPoint(ray, sphere.center) < radius + sphere.radius;
+}
+
+function getRayFittingTiles(root, ray, radius) {
+  const fittingTiles = [[root]];
+  for (const child of root.children) {
+    if (rayIntersectWithSphere(ray, radius, child.boundingSphere)) {
+      fittingTiles.push(getRayFittingTiles(child, ray, radius));
+    }
+  }
+  return fittingTiles.flat();
+}
+
+// ray in in ecef
+Scene.prototype.drillPickFromRayFast = function (ray, width) {
+  const root_tile = this.primitives._primitives[1].root;
+  const tileset = getRayFittingTiles(root_tile, ray, width);
+  return rayIntersection(tileset, ray, width);
 };
 
 Scene.prototype.getVerticalIntersection = function (point, width) {
