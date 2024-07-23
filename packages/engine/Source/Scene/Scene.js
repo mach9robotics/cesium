@@ -4111,6 +4111,17 @@ function ecefToEnu(ref, point) {
   return transformed;
 }
 
+function dirConv(ref, dir) {
+  const ecefFromEnu = Transforms.eastNorthUpToFixedFrame(ref);
+  const enuFromEcef = Matrix4.inverseTransformation(ecefFromEnu, new Matrix4());
+  const transformed = Matrix4.multiplyByPointAsVector(
+    enuFromEcef,
+    dir,
+    new Cartesian3()
+  );
+  return transformed;
+}
+
 function getRayIntersectionWithTile(tile, ray, radius) {
   if (!tile.content) {
     return null;
@@ -4119,7 +4130,7 @@ function getRayIntersectionWithTile(tile, ray, radius) {
     tile._content._model._loader._ecefRefPoint,
     ray.origin
   );
-  const direction = ecefToEnu(
+  const direction = dirConv(
     tile.content._model._loader._ecefRefPoint,
     ray.direction
   );
@@ -4135,7 +4146,8 @@ function rayIntersection(tileset, ray, radius) {
   for (const tile of tileset) {
     const intersection = getRayIntersectionWithTile(tile, ray, radius);
     if (intersection) {
-      return intersection;
+      const content = tile._content;
+      return [intersection, content, tile._tileset];
     }
   }
   return undefined;
@@ -4193,7 +4205,11 @@ function getRayFittingTiles(root, ray, radius) {
 Scene.prototype.drillPickFromRayFast = function (ray, width) {
   const root_tile = this.primitives._primitives[1].root;
   const tileset = getRayFittingTiles(root_tile, ray, width);
-  return rayIntersection(tileset, ray, width);
+  const ret = rayIntersection(tileset, ray, width);
+  if (!ret) {
+    return undefined;
+  }
+  return [ret[0], { content: ret[1], primitive: ret[2] }];
 };
 
 Scene.prototype.getVerticalIntersection = function (point, width) {

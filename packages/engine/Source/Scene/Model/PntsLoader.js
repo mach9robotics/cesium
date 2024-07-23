@@ -792,7 +792,6 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   box[5] = this._boxENU[5];
   const curNode = 0;
   const depth = 1;
-
   const result = rayIterate(
     indexedTree,
     positions,
@@ -814,7 +813,11 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
     result[1],
     result[2]
   );
-  return new Cartesian3(ecef[0], ecef[1], ecef[2]);
+  return new Cartesian3(
+    ecef[0] + this._ecefRefPoint.x,
+    ecef[1] + this._ecefRefPoint.y,
+    ecef[2] + this._ecefRefPoint.z
+  );
 };
 
 function rayIterate(
@@ -841,17 +844,16 @@ function rayIterate(
     boundingBox[4],
     boundingBox[5]
   );
-  console.log(distanceFromRayToPoint(ray, curPoint), ray, curPoint);
   if (distanceFromRayToPoint(ray, sphere[0]) > sphere[1] + radius) {
     return null;
   }
   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
-    console.log("ever?");
+    // console.log(curPoint, ray);
     return curPoint;
   }
 
   if (depth % 3 === 0) {
-    const maxx = boundingBox[1];
+    let maxx = boundingBox[1];
     boundingBox[1] = curx;
     if (indexedTree[curNode * 2] !== 0) {
       const leftBoundingBox = rayIterate(
@@ -868,6 +870,7 @@ function rayIterate(
       }
     }
     boundingBox[1] = maxx;
+    maxx = boundingBox[0];
     boundingBox[0] = curx;
     if (indexedTree[curNode * 2 + 1] !== 0) {
       const rightBoundingBox = rayIterate(
@@ -879,11 +882,12 @@ function rayIterate(
         depth + 1,
         radius
       );
+      boundingBox[0] = maxx;
       return rightBoundingBox;
     }
     return null;
   } else if (depth % 3 === 1) {
-    const maxy = boundingBox[3];
+    let maxy = boundingBox[3];
     boundingBox[3] = cury;
     if (indexedTree[curNode * 2] !== 0) {
       const leftBoundingBox = rayIterate(
@@ -900,6 +904,7 @@ function rayIterate(
       }
     }
     boundingBox[3] = maxy;
+    maxy = boundingBox[2];
     boundingBox[2] = cury;
     if (indexedTree[curNode * 2 + 1] !== 0) {
       const rightBoundingBox = rayIterate(
@@ -911,11 +916,12 @@ function rayIterate(
         depth + 1,
         radius
       );
+      boundingBox[2] = maxy;
       return rightBoundingBox;
     }
     return null;
   }
-  const maxz = boundingBox[5];
+  let maxz = boundingBox[5];
   boundingBox[5] = curz;
   if (indexedTree[curNode * 2] !== 0) {
     const leftBoundingBox = rayIterate(
@@ -932,6 +938,7 @@ function rayIterate(
     }
   }
   boundingBox[5] = maxz;
+  maxz = boundingBox[4];
   boundingBox[4] = curz;
   if (indexedTree[curNode * 2 + 1] !== 0) {
     const rightBoundingBox = rayIterate(
@@ -943,6 +950,7 @@ function rayIterate(
       depth + 1,
       radius
     );
+    boundingBox[4] = maxz;
     return rightBoundingBox;
   }
   return null;
