@@ -956,6 +956,13 @@ function rayIterate(
   curPoint[0] = curx;
   curPoint[1] = cury;
   curPoint[2] = curz;
+  if (
+    boundingBox[0] > boundingBox[1] ||
+    boundingBox[3] > boundingBox[2] ||
+    boundingBox[5] > boundingBox[4]
+  ) {
+    console.log("invalid box");
+  }
   const sphere = boundingSphereOfBox(
     boundingBox[0],
     boundingBox[1],
@@ -1284,7 +1291,6 @@ function makeComponents(loader, context) {
   }
   loader._indexedTree = make2DTree(loader._enuCoords);
   const treeComponents = make3DTree(loader, loader._enuCoords);
-  console.log(treeComponents[0]);
   loader._3DTree = treeComponents[0];
   loader._boxENU = treeComponents[1];
   // if (loader._pointsLength > 71000)
