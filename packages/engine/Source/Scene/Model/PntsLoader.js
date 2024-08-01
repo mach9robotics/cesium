@@ -715,109 +715,6 @@ function partition(positions, A, lo, hi, depth) {
   return i;
 }
 
-// function loopTree(indexedTree, curNode, visited) {
-//   if (curNode === -1)
-//     return true;
-//   visited.push(curNode);
-//   if (visited.includes(indexedTree[2*curNode]) || visited.includes(indexedTree[2*curNode+1]))
-//     return false;
-//   return loopTree(indexedTree, indexedTree[2*curNode], visited) && loopTree(indexedTree, indexedTree[2*curNode+1], visited);
-// }
-
-// function checkTree(positions, indexedTree, curNode, depth) {
-//   if (curNode === -1)
-//     return true;
-//   const axis = depth % 3;
-//   if (indexedTree[2*curNode] === -1 && indexedTree[2*curNode+1] === -1) {
-//     return true;
-//   }
-//   if (indexedTree[2*curNode] != -1 && positions[3*curNode + axis] < positions[3*indexedTree[2*curNode]+axis]) {
-//     return false;
-//   }
-//   if (indexedTree[2*curNode+1] != -1 && positions[3*curNode + axis] > positions[3*indexedTree[2*curNode+1]+axis]) {
-//     return false;
-//   }
-//   return checkTree(positions, indexedTree, indexedTree[2*curNode], depth+1) && checkTree(positions, indexedTree, indexedTree[2*curNode+1], depth+1);
-// }
-
-// function appendToTree3D(
-//   indexedTree,
-//   positions,
-//   pointIndex,
-//   curNode,
-//   depth
-// ) {
-//   const curx = positions[curNode * 3];
-//   const cury = positions[curNode * 3 + 1];
-//   const curz = positions[curNode * 3 + 2];
-//   const pointx = positions[pointIndex * 3];
-//   const pointy = positions[pointIndex * 3 + 1];
-//   const pointz = positions[pointIndex * 3 + 2];
-//   if (depth % 3 === 0) {
-//     if (pointx <= curx) {
-//       if (indexedTree[curNode * 2] === -1) {
-//         indexedTree[curNode * 2] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2];
-//     } else {
-//       if (indexedTree[curNode * 2 + 1] === -1) {
-//         indexedTree[curNode * 2 + 1] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2 + 1];
-//     }
-//     return appendToTree3D(
-//       indexedTree,
-//       positions,
-//       pointIndex,
-//       curNode,
-//       depth + 1
-//     );
-//   } else if (depth % 3 === 1) {
-//     if (pointy <= cury) {
-//       if (indexedTree[curNode * 2] === -1) {
-//         indexedTree[curNode * 2] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2];
-//     } else {
-//       if (indexedTree[curNode * 2 + 1] === -1) {
-//         indexedTree[curNode * 2 + 1] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2 + 1];
-//     }
-//     return appendToTree3D(
-//       indexedTree,
-//       positions,
-//       pointIndex,
-//       curNode,
-//       depth + 1
-//     );
-//   }
-//   if (pointz <= curz) {
-//     if (indexedTree[curNode * 2] === -1) {
-//       indexedTree[curNode * 2] = pointIndex;
-//       return;
-//     }
-//     curNode = indexedTree[curNode * 2];
-//   } else {
-//     if (indexedTree[curNode * 2 + 1] === -1) {
-//       indexedTree[curNode * 2 + 1] = pointIndex;
-//       return;
-//     }
-//     curNode = indexedTree[curNode * 2 + 1];
-//   }
-//   return appendToTree3D(
-//     indexedTree,
-//     positions,
-//     pointIndex,
-//     curNode,
-//     depth + 1
-//   );
-// }
-
 function distance(v1, v2) {
   return Math.sqrt(
     (v1[0] - v2[0]) ** 2 + (v1[1] - v2[1]) ** 2 + (v1[2] - v2[2]) ** 2
@@ -927,43 +824,16 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   );
 };
 
-// function bfsPrint(
-//   indexedTree,
-//   positions,
-//   boundingBox
-// ) {
-//   const queue = [[0, 1, boundingBox[0], boundingBox[1], boundingBox[2], boundingBox[3], boundingBox[4], boundingBox[5]]];
-//   while (queue.length > 0) {
-//     const nodedepth = queue.shift();
-//     const curNode = nodedepth[0];
-//     const depth = nodedepth[1];
-//     console.log("Depth: %d Total length: %d", depth, positions.length / 3);
-//     console.log("X: %d, Y: %d, Z: %d", nodedepth[3]-nodedepth[2], nodedepth[5]-nodedepth[4], nodedepth[7]-nodedepth[6]);
-//     console.log(nodedepth[3], nodedepth[2], nodedepth[5], nodedepth[4], nodedepth[7], nodedepth[6]);
-//     if (depth % 3 === 0) {
-//       if (indexedTree[curNode * 2] !== 0) {
-//         queue.push([indexedTree[curNode * 2], depth+1, boundingBox[0], positions[curNode*3], boundingBox[2], boundingBox[3], boundingBox[4], boundingBox[5]]);
-//       }
-//       if (indexedTree[curNode * 2 + 1] !== 0) {
-//         queue.push([indexedTree[curNode * 2 + 1], depth+1, positions[curNode*3], boundingBox[1], boundingBox[2], boundingBox[3], boundingBox[4], boundingBox[5]]);
-//       }
-//     } else if (depth % 3 === 1) {
-//       if (indexedTree[curNode * 2] !== 0) {
-//         queue.push([indexedTree[curNode * 2], depth+1, boundingBox[0], boundingBox[1], boundingBox[2], positions[curNode*3+1], boundingBox[4], boundingBox[5]]);
-//       }
-//       if (indexedTree[curNode * 2 + 1] !== 0) {
-//         queue.push([indexedTree[curNode * 2 + 1], depth+1, boundingBox[0], boundingBox[1], positions[curNode*3+1], boundingBox[3], boundingBox[4], boundingBox[5]]);
-//       }
-//     } else {
-//       if (indexedTree[curNode * 2] !== 0) {
-//         queue.push([indexedTree[curNode * 2], depth+1, boundingBox[0], boundingBox[1], boundingBox[2], boundingBox[3], boundingBox[4], positions[curNode*3+2]]);
-//       }
-//       if (indexedTree[curNode * 2 + 1] !== 0) {
-//         queue.push([indexedTree[curNode * 2 + 1], depth+1, boundingBox[0], boundingBox[1], boundingBox[2], boundingBox[3], positions[curNode*3+2], boundingBox[5]]);
-//       }
-//     }
-//   }
-// }
+function comp(a, b, ray) {
+  if (!a) {
+    return b;
+  } else if (!b) {
+    return a;
+  } else if (distanceFromRayToPoint(ray, a) < distanceFromRayToPoint(ray, b)) {
+    return a;
+  }
+  return b;
+}
 
 function rayIterate(
   indexedTree,
@@ -992,19 +862,21 @@ function rayIterate(
     boundingBox[4],
     boundingBox[5]
   );
+  let cur = null;
   if (distanceFromRayToPoint(ray, sphere[0]) > sphere[1] + radius) {
     return null;
   }
   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
-    return curPoint;
+    cur = curPoint;
   }
-
   const leftBound = boundingBox[2 * axis];
   const rightBound = boundingBox[2 * axis + 1];
+  let left = null;
+  let right = null;
   // Left
   if (indexedTree[curNode * 2] !== -1) {
     boundingBox[2 * axis + 1] = curAxis;
-    const leftBoundingBox = rayIterate(
+    left = rayIterate(
       indexedTree,
       positions,
       ray,
@@ -1013,15 +885,12 @@ function rayIterate(
       depth + 1,
       radius
     );
-    if (leftBoundingBox) {
-      return leftBoundingBox;
-    }
   }
   boundingBox[2 * axis + 1] = rightBound;
   boundingBox[2 * axis] = curAxis;
   // Right
   if (indexedTree[curNode * 2 + 1] !== -1) {
-    const rightBoundingBox = rayIterate(
+    right = rayIterate(
       indexedTree,
       positions,
       ray,
@@ -1030,50 +899,10 @@ function rayIterate(
       depth + 1,
       radius
     );
-    if (rightBoundingBox) {
-      return rightBoundingBox;
-    }
   }
   boundingBox[2 * axis] = leftBound;
-  return null;
+  return comp(cur, comp(left, right, ray), ray);
 }
-
-// function findClosest3D(indexedTree, positions, point) {
-
-// }
-
-// function treeNavigator3D(indexedTree, positions, point, curNode, depth) {
-//   const curx = positions[curNode*3];
-//   const cury = positions[curNode*3+1];
-//   if (depth % 2 === 0) {
-//       const curPoint = new Cartesian3(positions[curNode*3], positions[curNode*3+1], positions[curNode*3+2]);
-//       if (point.y <= cury) {
-//           if (indexedTree[curNode*2] === 0)
-//               return curPoint;
-//           curNode = indexedTree[curNode*2];
-//       }
-//       else {
-//           if (indexedTree[curNode*2+1] === 0)
-//               return curPoint;
-//           curNode = indexedTree[curNode*2+1];
-//       }
-//       return closerPoint(point, curPoint, findClosestPointinTree(indexedTree, positions, point, curNode, depth+1));
-//   }
-//   else {
-//       const curPoint = new Cartesian3(positions[curNode*3], positions[curNode*3+1], positions[curNode*3+2]);
-//       if (point.x <= curx) {
-//           if (indexedTree[curNode*2] === 0)
-//               return curPoint;
-//           curNode = indexedTree[curNode*2];
-//       }
-//       else {
-//           if (indexedTree[curNode*2+1] === 0)
-//               return curPoint;
-//           curNode = indexedTree[curNode*2+1];
-//       }
-//       return closerPoint(point, curPoint, findClosestPointinTree(indexedTree, positions, point, curNode, depth+1));
-//   }
-// }
 
 // Function to make a 2d tree based on the x y coordinates of points
 // positions should be a Float32 Array in the form [x1, y1, z1, x2, y2, z2, ...]
@@ -1081,54 +910,54 @@ function rayIterate(
 // Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
 // l represents the index of the point's left child, and r represents the index of the points right child.
 // If l = 0, then the point does not have a left child, similarly if r = 0 then there is no right child
-function make2DTree(positions) {
-  //assert(positions.length % 3 === 0);
-  const numberOfPoints = positions.length / 3;
-  const indexedTree = new Int32Array(numberOfPoints * 2);
-  for (let i = 1; i < numberOfPoints; i++) {
-    // Root node will always be at index 0
-    const curNode = 0;
-    const depth = 1;
-    appendToTree(indexedTree, positions, i, curNode, depth);
-  }
-  return indexedTree;
-}
+// function make2DTree(positions) {
+//   //assert(positions.length % 3 === 0);
+//   const numberOfPoints = positions.length / 3;
+//   const indexedTree = new Int32Array(numberOfPoints * 2);
+//   for (let i = 1; i < numberOfPoints; i++) {
+//     // Root node will always be at index 0
+//     const curNode = 0;
+//     const depth = 1;
+//     appendToTree(indexedTree, positions, i, curNode, depth);
+//   }
+//   return indexedTree;
+// }
 
-function appendToTree(indexedTree, positions, pointIndex, curNode, depth) {
-  const curx = positions[curNode * 3];
-  const cury = positions[curNode * 3 + 1];
-  const pointx = positions[pointIndex * 3];
-  const pointy = positions[pointIndex * 3 + 1];
-  if (depth % 2 === 0) {
-    if (pointy <= cury) {
-      if (indexedTree[curNode * 2] === 0) {
-        indexedTree[curNode * 2] = pointIndex;
-        return;
-      }
-      curNode = indexedTree[curNode * 2];
-    } else {
-      if (indexedTree[curNode * 2 + 1] === 0) {
-        indexedTree[curNode * 2 + 1] = pointIndex;
-        return;
-      }
-      curNode = indexedTree[curNode * 2 + 1];
-    }
-    return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
-  } else if (pointx <= curx) {
-    if (indexedTree[curNode * 2] === 0) {
-      indexedTree[curNode * 2] = pointIndex;
-      return;
-    }
-    curNode = indexedTree[curNode * 2];
-  } else {
-    if (indexedTree[curNode * 2 + 1] === 0) {
-      indexedTree[curNode * 2 + 1] = pointIndex;
-      return;
-    }
-    curNode = indexedTree[curNode * 2 + 1];
-  }
-  return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
-}
+// function appendToTree(indexedTree, positions, pointIndex, curNode, depth) {
+//   const curx = positions[curNode * 3];
+//   const cury = positions[curNode * 3 + 1];
+//   const pointx = positions[pointIndex * 3];
+//   const pointy = positions[pointIndex * 3 + 1];
+//   if (depth % 2 === 0) {
+//     if (pointy <= cury) {
+//       if (indexedTree[curNode * 2] === 0) {
+//         indexedTree[curNode * 2] = pointIndex;
+//         return;
+//       }
+//       curNode = indexedTree[curNode * 2];
+//     } else {
+//       if (indexedTree[curNode * 2 + 1] === 0) {
+//         indexedTree[curNode * 2 + 1] = pointIndex;
+//         return;
+//       }
+//       curNode = indexedTree[curNode * 2 + 1];
+//     }
+//     return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
+//   } else if (pointx <= curx) {
+//     if (indexedTree[curNode * 2] === 0) {
+//       indexedTree[curNode * 2] = pointIndex;
+//       return;
+//     }
+//     curNode = indexedTree[curNode * 2];
+//   } else {
+//     if (indexedTree[curNode * 2 + 1] === 0) {
+//       indexedTree[curNode * 2 + 1] = pointIndex;
+//       return;
+//     }
+//     curNode = indexedTree[curNode * 2 + 1];
+//   }
+//   return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
+// }
 
 function makeComponents(loader, context) {
   const parsedContent = loader._parsedContent;
@@ -1245,7 +1074,7 @@ function makeComponents(loader, context) {
     loader._enuCoords[3 * i + 1] = enuCoords[1];
     loader._enuCoords[3 * i + 2] = enuCoords[2];
   }
-  loader._indexedTree = make2DTree(loader._enuCoords);
+  //loader._indexedTree = make2DTree(loader._enuCoords);
   const treeComponents = make3DTree(loader, loader._enuCoords);
   loader._3DTree = treeComponents[0];
   loader._boxENU = treeComponents[1];

@@ -4143,14 +4143,20 @@ function getRayIntersectionWithTile(tile, ray, radius) {
 }
 
 function rayIntersection(tileset, ray, radius) {
+  let min = Infinity;
+  let ret;
   for (const tile of tileset) {
     const intersection = getRayIntersectionWithTile(tile, ray, radius);
     if (intersection) {
-      const content = tile._content;
-      return [intersection, content, tile._tileset];
+      const dist = distanceFromRayToPoint(ray, intersection);
+      if (dist < min) {
+        const content = tile._content;
+        min = dist;
+        ret = [intersection, content, tile._tileset];
+      }
     }
   }
-  return undefined;
+  return ret;
 }
 
 function closestPointOnLineToPoint(point, line) {
