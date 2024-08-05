@@ -68,7 +68,6 @@ function PntsLoader(options) {
   this._indexedTree = undefined;
   this._beginNode = undefined;
   this._boxENU = undefined;
-  this._transformationMatrix = undefined;
   this._rtcCenter = undefined;
   this._pointsLength = undefined;
   this._ecefRefPoint = undefined;
@@ -81,8 +80,6 @@ function PntsLoader(options) {
   // The batch table object contains a json and a binary component access using keys of the same name.
   this._components = undefined;
   this._transform = Matrix4.IDENTITY;
-
-  this.test_variable = [];
 }
 
 if (defined(Object.create)) {
@@ -620,6 +617,12 @@ function findBoundingBox(positions) {
   return ret;
 }
 
+// Function to make a 3d tree based on the x y coordinates of points
+// positions should be a Float32 Array in the form [x1, y1, z1, x2, y2, z2, ...]
+// Output will be an Int32 Array in the form [l1, r1, l2, r2, ...]
+// Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
+// l represents the index of the point's left child, and r represents the index of the points right child.
+// If l = -1, then the point does not have a left child, similarly if r = -1 then there is no right child
 function make3DTree(loader, positions) {
   const numberOfPoints = positions.length / 3;
   const indexedTree = new Int32Array(numberOfPoints * 2);
@@ -653,6 +656,10 @@ function quicksort(positions, A, lo, mid, hi, depth, indexedTree) {
   }
 }
 
+
+// The partition algorithm is designed as a median pick algorithm; take the
+// low, middle, and high indicies of the array segment and take the median of 
+// the three values and uses it as the pivot for the next partition.
 function partition(positions, A, lo, hi, depth) {
   const axis = depth % 3;
   if (hi < lo) {
@@ -676,24 +683,23 @@ function partition(positions, A, lo, hi, depth) {
 
   let pivot = A[hi];
   let pivot_index = hi;
-  if (low < high) {
-    if (middle < low) {
-      pivot = A[lo];
-      pivot_index = lo;
-    } else if (high < middle) {
-      pivot = A[hi];
-      pivot_index = hi;
-    } else {
-      pivot = mid;
-      pivot_index = Math.floor((lo + hi) / 2);
-    }
-  } else if (middle < high) {
+
+  if (low <= middle && middle <= high) {
+    pivot = mid;
+    pivot_index = Math.floor((lo + hi) / 2);
+  } else if (middle <= high && high <= low) {
     pivot = A[hi];
     pivot_index = hi;
-  } else if (low < middle) {
+  } else if (middle <= low && low <= high) {
     pivot = A[lo];
     pivot_index = lo;
-  } else {
+  } else if (low <= high && high <= middle) {
+    pivot = A[hi];
+    pivot_index = hi;
+  } else if (high <= low && low <= middle ) {
+    pivot = A[lo];
+    pivot_index = lo;
+  } else if (high <= middle && middle <=  low) {
     pivot = mid;
     pivot_index = Math.floor((lo + hi) / 2);
   }
@@ -715,7 +721,7 @@ function partition(positions, A, lo, hi, depth) {
   return i;
 }
 
-function distance(v1, v2) {
+function float64ArrayDistance(v1, v2) {
   return Math.sqrt(
     (v1[0] - v2[0]) ** 2 + (v1[1] - v2[1]) ** 2 + (v1[2] - v2[2]) ** 2
   );
@@ -766,10 +772,17 @@ function distanceFromRayToPoint(ray, point) {
   dir[0] = ray.direction.x;
   dir[1] = ray.direction.y;
   dir[2] = ray.direction.z;
-  return distance(point, closestPointOnRayToPoint(point, origin, dir));
+  return float64ArrayDistance(point, closestPointOnRayToPoint(point, origin, dir));
 }
 
-function boundingSphereOfBox(minx, maxx, miny, maxy, minz, maxz) {
+function boundingSphereOfBox(boundingBox) {
+  const minx = boundingBox[0];
+  const maxx = boundingBox[1];
+  const miny = boundingBox[2];
+  const maxy = boundingBox[3];
+  const minz = boundingBox[4];
+  const maxz = boundingBox[5];
+
   const center = new Float64Array(3);
   center[0] = (minx + maxx) / 2;
   center[1] = (miny + maxy) / 2;
@@ -778,7 +791,7 @@ function boundingSphereOfBox(minx, maxx, miny, maxy, minz, maxz) {
   vertex[0] = minx;
   vertex[1] = miny;
   vertex[2] = minz;
-  const radius = distance(center, vertex);
+  const radius = float64ArrayDistance(center, vertex);
   return [center, radius];
 }
 
@@ -824,7 +837,7 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   );
 };
 
-function comp(a, b, ray) {
+function compareDistanceToRay(a, b, ray) {
   if (!a) {
     return b;
   } else if (!b) {
@@ -854,14 +867,7 @@ function rayIterate(
   curPoint[1] = cury;
   curPoint[2] = curz;
 
-  const sphere = boundingSphereOfBox(
-    boundingBox[0],
-    boundingBox[1],
-    boundingBox[2],
-    boundingBox[3],
-    boundingBox[4],
-    boundingBox[5]
-  );
+  const sphere = boundingSphereOfBox(boundingBox);
   let cur = null;
   if (distanceFromRayToPoint(ray, sphere[0]) > sphere[1] + radius) {
     return null;
@@ -901,63 +907,8 @@ function rayIterate(
     );
   }
   boundingBox[2 * axis] = leftBound;
-  return comp(cur, comp(left, right, ray), ray);
+  return compareDistanceToRay(cur, compareDistanceToRay(left, right, ray), ray);
 }
-
-// Function to make a 2d tree based on the x y coordinates of points
-// positions should be a Float32 Array in the form [x1, y1, z1, x2, y2, z2, ...]
-// Output will be an Int32 Array in the form [l1, r1, l2, r2, ...]
-// Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
-// l represents the index of the point's left child, and r represents the index of the points right child.
-// If l = 0, then the point does not have a left child, similarly if r = 0 then there is no right child
-// function make2DTree(positions) {
-//   //assert(positions.length % 3 === 0);
-//   const numberOfPoints = positions.length / 3;
-//   const indexedTree = new Int32Array(numberOfPoints * 2);
-//   for (let i = 1; i < numberOfPoints; i++) {
-//     // Root node will always be at index 0
-//     const curNode = 0;
-//     const depth = 1;
-//     appendToTree(indexedTree, positions, i, curNode, depth);
-//   }
-//   return indexedTree;
-// }
-
-// function appendToTree(indexedTree, positions, pointIndex, curNode, depth) {
-//   const curx = positions[curNode * 3];
-//   const cury = positions[curNode * 3 + 1];
-//   const pointx = positions[pointIndex * 3];
-//   const pointy = positions[pointIndex * 3 + 1];
-//   if (depth % 2 === 0) {
-//     if (pointy <= cury) {
-//       if (indexedTree[curNode * 2] === 0) {
-//         indexedTree[curNode * 2] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2];
-//     } else {
-//       if (indexedTree[curNode * 2 + 1] === 0) {
-//         indexedTree[curNode * 2 + 1] = pointIndex;
-//         return;
-//       }
-//       curNode = indexedTree[curNode * 2 + 1];
-//     }
-//     return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
-//   } else if (pointx <= curx) {
-//     if (indexedTree[curNode * 2] === 0) {
-//       indexedTree[curNode * 2] = pointIndex;
-//       return;
-//     }
-//     curNode = indexedTree[curNode * 2];
-//   } else {
-//     if (indexedTree[curNode * 2 + 1] === 0) {
-//       indexedTree[curNode * 2 + 1] = pointIndex;
-//       return;
-//     }
-//     curNode = indexedTree[curNode * 2 + 1];
-//   }
-//   return appendToTree(indexedTree, positions, pointIndex, curNode, depth + 1);
-// }
 
 function makeComponents(loader, context) {
   const parsedContent = loader._parsedContent;
