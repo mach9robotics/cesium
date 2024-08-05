@@ -358,6 +358,24 @@ function Scene(options) {
   this.nearToFarDistance2D = 1.75e6;
 
   /**
+   * The vertical exaggeration of the scene.
+   * When set to 1.0, no exaggeration is applied.
+   *
+   * @type {number}
+   * @default 1.0
+   */
+  this.verticalExaggeration = 1.0;
+
+  /**
+   * The reference height for vertical exaggeration of the scene.
+   * When set to 0.0, the exaggeration is applied relative to the ellipsoid surface.
+   *
+   * @type {number}
+   * @default 0.0
+   */
+  this.verticalExaggerationRelativeHeight = 0.0;
+
+  /**
    * This property is for debugging only; it is not for production use.
    * <p>
    * A function that determines what commands are executed.  As shown in the examples below,
@@ -755,13 +773,13 @@ Object.defineProperties(Scene.prototype, {
   },
 
   /**
-   * The drawingBufferHeight of the underlying GL context.
+   * The drawingBufferWidth of the underlying GL context.
    * @memberof Scene.prototype
    *
    * @type {number}
    * @readonly
    *
-   * @see {@link https://www.khronos.org/registry/webgl/specs/1.0/#DOM-WebGLRenderingContext-drawingBufferHeight|drawingBufferHeight}
+   * @see {@link https://www.khronos.org/registry/webgl/specs/1.0/#DOM-WebGLRenderingContext-drawingBufferWidth|drawingBufferWidth}
    */
   drawingBufferWidth: {
     get: function () {
@@ -1881,10 +1899,17 @@ Scene.prototype.updateFrameState = function () {
   frameState.cameraUnderground = this._cameraUnderground;
   frameState.globeTranslucencyState = this._globeTranslucencyState;
 
-  if (defined(this.globe)) {
-    frameState.terrainExaggeration = this.globe.terrainExaggeration;
-    frameState.terrainExaggerationRelativeHeight = this.globe.terrainExaggerationRelativeHeight;
+  const { globe } = this;
+  if (defined(globe) && globe._terrainExaggerationChanged) {
+    // Honor a user-set value for the old deprecated globe.terrainExaggeration.
+    // This can be removed when Globe.terrainExaggeration is removed.
+    this.verticalExaggeration = globe._terrainExaggeration;
+    this.verticalExaggerationRelativeHeight =
+      globe._terrainExaggerationRelativeHeight;
+    globe._terrainExaggerationChanged = false;
   }
+  frameState.verticalExaggeration = this.verticalExaggeration;
+  frameState.verticalExaggerationRelativeHeight = this.verticalExaggerationRelativeHeight;
 
   if (
     defined(this._specularEnvironmentMapAtlas) &&
@@ -3167,7 +3192,10 @@ Scene.prototype.updateEnvironment = function () {
         );
         environmentState.isReadyForAtmosphere =
           environmentState.isReadyForAtmosphere ||
+          !globe.show ||
           globe._surface._tilesToRender.length > 0;
+      } else {
+        environmentState.isReadyForAtmosphere = true;
       }
       environmentState.skyAtmosphereCommand = skyAtmosphere.update(
         frameState,
@@ -3868,7 +3896,7 @@ Scene.prototype.render = function (time) {
   updateDebugShowFramesPerSecond(this, shouldRender);
   tryAndCatchError(this, postPassesUpdate);
 
-  // Often used to trigger events (so don't want in trycatch) that the user might be subscribed to. Things like the tile load events, ready promises, etc.
+  // Often used to trigger events (so don't want in trycatch) that the user might be subscribed to. Things like the tile load events, promises, etc.
   // We don't want those events to resolve during the render loop because the events might add new primitives
   callAfterRenderFunctions(this);
 

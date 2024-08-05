@@ -128,26 +128,6 @@ describe(
       expect(widget.targetFrameRate).toBe(23);
     });
 
-    it("sets expected options imageryProvider", function () {
-      const options = {
-        imageryProvider: new TileCoordinatesImageryProvider(),
-      };
-      widget = createCesiumWidget(container, options);
-      const imageryLayers = widget.scene.imageryLayers;
-      expect(imageryLayers.length).toEqual(1);
-      expect(imageryLayers.get(0).imageryProvider).toBe(
-        options.imageryProvider
-      );
-    });
-
-    it("does not create an ImageryProvider if option is false", function () {
-      widget = createCesiumWidget(container, {
-        imageryProvider: false,
-      });
-      const imageryLayers = widget.scene.imageryLayers;
-      expect(imageryLayers.length).toEqual(0);
-    });
-
     it("sets expected options baseLayer", function () {
       const provider = new TileCoordinatesImageryProvider();
       const options = {
@@ -185,6 +165,13 @@ describe(
         globe: false,
       });
       expect(widget.scene.globe).not.toBeDefined();
+    });
+
+    it("sky atmopshere is hidden by default if a globe if option is false", function () {
+      widget = createCesiumWidget(container, {
+        globe: false,
+      });
+      expect(widget.scene.skyAtmosphere.show).toBeFalse();
     });
 
     it("does not create a skyBox if option is false", function () {

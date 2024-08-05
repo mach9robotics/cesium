@@ -82,17 +82,7 @@ describe("Scene/BingMapsImageryProvider", function () {
     expect(BingMapsImageryProvider).toConformToInterface(ImageryProvider);
   });
 
-  it("constructor throws when key is not specified", function () {
-    function constructWithoutServer() {
-      return new BingMapsImageryProvider({
-        url: "http://fake.fake.invalid",
-        mapStyle: BingMapsStyle.AERIAL,
-      });
-    }
-    expect(constructWithoutServer).toThrowDeveloperError();
-  });
-
-  function installFakeMetadataRequest(url, mapStyle, proxy) {
+  function installFakeMetadataRequest(url, mapStyle, mapLayer) {
     const baseUri = new Uri(appendForwardSlash(url));
     const expectedUri = new Uri(
       `REST/v1/Imagery/Metadata/${mapStyle}`
@@ -102,15 +92,16 @@ describe("Scene/BingMapsImageryProvider", function () {
       url,
       functionName
     ) {
-      let uri = new Uri(url);
-      if (proxy) {
-        uri = new Uri(decodeURIComponent(uri.query()));
-      }
+      const uri = new Uri(url);
 
       const query = queryToObject(uri.query());
       expect(query.jsonp).toBeDefined();
       expect(query.incl).toEqual("ImageryProviders");
       expect(query.key).toBeDefined();
+
+      if (defined(mapLayer)) {
+        expect(query.mapLayer).toEqual(mapLayer);
+      }
 
       uri.query("");
       expect(uri.toString()).toStartWith(expectedUri.toString());
@@ -199,156 +190,6 @@ describe("Scene/BingMapsImageryProvider", function () {
       );
     };
   }
-
-  it("resolves readyPromise", function () {
-    const url = "http://fake.fake.invalid";
-    const mapStyle = BingMapsStyle.ROAD;
-
-    installFakeMetadataRequest(url, mapStyle);
-    installFakeImageRequest();
-
-    const provider = new BingMapsImageryProvider({
-      url: url,
-      key: "",
-      mapStyle: mapStyle,
-    });
-
-    return provider.readyPromise.then(function (result) {
-      expect(result).toBe(true);
-      expect(provider.ready).toBe(true);
-    });
-  });
-
-  it("Uses cached metadata result", function () {
-    const url = "http://fake.fake.invalid";
-    const mapStyle = BingMapsStyle.ROAD;
-
-    installFakeMetadataRequest(url, mapStyle);
-    installFakeImageRequest();
-    const provider = new BingMapsImageryProvider({
-      url: url,
-      mapStyle: mapStyle,
-      key: "",
-    });
-    let provider2;
-    let provider3;
-
-    return provider.readyPromise
-      .then(function (result) {
-        expect(result).toBe(true);
-        expect(provider.ready).toBe(true);
-
-        installFakeMetadataRequest(url, mapStyle);
-        installFakeImageRequest();
-        provider2 = new BingMapsImageryProvider({
-          url: url,
-          mapStyle: mapStyle,
-          key: "",
-        });
-        return provider2.readyPromise;
-      })
-      .then(function (result) {
-        expect(result).toBe(true);
-        expect(provider2.ready).toBe(true);
-
-        //These are the same instance only if the cache has been used
-        expect(provider._attributionList).toBe(provider2._attributionList);
-
-        installFakeMetadataRequest(url, BingMapsStyle.AERIAL);
-        installFakeImageRequest();
-        provider3 = new BingMapsImageryProvider({
-          url: url,
-          mapStyle: BingMapsStyle.AERIAL,
-          key: "",
-        });
-        return provider3.readyPromise;
-      })
-      .then(function (result) {
-        expect(result).toBe(true);
-        expect(provider3.ready).toBe(true);
-
-        // Because the road is different, a non-cached request should have happened
-        expect(provider3._attributionList).not.toBe(provider._attributionList);
-      });
-  });
-
-  it("resolves readyPromise with a path", function () {
-    const url = "http://fake.fake.invalid/some/subdirectory";
-    const mapStyle = BingMapsStyle.ROAD;
-
-    installFakeMetadataRequest(url, mapStyle);
-    installFakeImageRequest();
-
-    const provider = new BingMapsImageryProvider({
-      url: url,
-      mapStyle: mapStyle,
-      key: "",
-    });
-
-    return provider.readyPromise.then(function (result) {
-      expect(result).toBe(true);
-      expect(provider.ready).toBe(true);
-    });
-  });
-
-  it("resolves readyPromise with a path ending with a slash", function () {
-    const url = "http://fake.fake.invalid/some/subdirectory/";
-    const mapStyle = BingMapsStyle.ROAD;
-
-    installFakeMetadataRequest(url, mapStyle);
-    installFakeImageRequest();
-
-    const provider = new BingMapsImageryProvider({
-      url: url,
-      mapStyle: mapStyle,
-      key: "",
-    });
-
-    return provider.readyPromise.then(function (result) {
-      expect(result).toBe(true);
-      expect(provider.ready).toBe(true);
-    });
-  });
-
-  it("resolves readyPromise with Resource", function () {
-    const url = "http://fake.fake.invalid";
-    const mapStyle = BingMapsStyle.ROAD;
-
-    installFakeMetadataRequest(url, mapStyle);
-    installFakeImageRequest();
-
-    const resource = new Resource({
-      url: url,
-    });
-
-    const provider = new BingMapsImageryProvider({
-      url: resource,
-      mapStyle: mapStyle,
-      key: "",
-    });
-
-    return provider.readyPromise.then(function (result) {
-      expect(result).toBe(true);
-      expect(provider.ready).toBe(true);
-    });
-  });
-
-  it("rejects readyPromise on error", function () {
-    const url = "http://host.invalid";
-    const provider = new BingMapsImageryProvider({
-      url: url,
-      key: "",
-    });
-
-    return provider.readyPromise
-      .then(function () {
-        fail("should not resolve");
-      })
-      .catch(function (e) {
-        expect(provider.ready).toBe(false);
-        expect(e.message).toContain(url);
-      });
-  });
 
   it("fromUrl throws if url is not provided", async function () {
     await expectAsync(
@@ -459,6 +300,28 @@ describe("Scene/BingMapsImageryProvider", function () {
     });
     expect(provider).toBeInstanceOf(BingMapsImageryProvider);
     expect(provider.url).toEqual(url);
+  });
+
+  it("fromUrl takes mapLayer as option and sets hasAlphaChannel accordingly", async function () {
+    const url = "http://fake.fake.invalid/";
+    const mapStyle = BingMapsStyle.AERIAL_WITH_LABELS_ON_DEMAND;
+    const mapLayer = "Foreground";
+
+    installFakeMetadataRequest(url, mapStyle, mapLayer);
+    installFakeImageRequest();
+
+    const resource = new Resource({
+      url: url,
+    });
+
+    const provider = await BingMapsImageryProvider.fromUrl(resource, {
+      key: "",
+      mapStyle: mapStyle,
+      mapLayer: mapLayer,
+    });
+
+    expect(provider.mapLayer).toEqual("Foreground");
+    expect(provider.hasAlphaChannel).toBe(true);
   });
 
   it("fromUrl throws if request fails", async function () {

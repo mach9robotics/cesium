@@ -5,13 +5,12 @@ import Cartographic from "../Core/Cartographic.js";
 import Check from "../Core/Check.js";
 import defaultValue from "../Core/defaultValue.js";
 import defined from "../Core/defined.js";
-import deprecationWarning from "../Core/deprecationWarning.js";
 import destroyObject from "../Core/destroyObject.js";
 import DeveloperError from "../Core/DeveloperError.js";
 import GeometryInstance from "../Core/GeometryInstance.js";
 import OrientedBoundingBox from "../Core/OrientedBoundingBox.js";
 import Rectangle from "../Core/Rectangle.js";
-import TerrainExaggeration from "../Core/TerrainExaggeration.js";
+import VerticalExaggeration from "../Core/VerticalExaggeration.js";
 import ClassificationPrimitive from "./ClassificationPrimitive.js";
 import ClassificationType from "./ClassificationType.js";
 import PerInstanceColorAppearance from "./PerInstanceColorAppearance.js";
@@ -212,30 +211,6 @@ function GroundPrimitive(options) {
   this._boundingVolumes2D = [];
 
   this._ready = false;
-
-  const groundPrimitive = this;
-  // This is here for backwards compatibility. This promise wrapper can be removed once readyPromise is removed.
-  this._readyPromise = new Promise((resolve, reject) => {
-    groundPrimitive._completeLoad = () => {
-      if (this._ready) {
-        return;
-      }
-
-      this._ready = true;
-
-      if (this.releaseGeometryInstances) {
-        this.geometryInstances = undefined;
-      }
-
-      const error = this._error;
-      if (!defined(error)) {
-        resolve(this);
-      } else {
-        reject(error);
-      }
-    };
-  });
-
   this._primitive = undefined;
 
   this._maxHeight = undefined;
@@ -382,23 +357,6 @@ Object.defineProperties(GroundPrimitive.prototype, {
   ready: {
     get: function () {
       return this._ready;
-    },
-  },
-
-  /**
-   * Gets a promise that resolves when the primitive is ready to render.
-   * @memberof GroundPrimitive.prototype
-   * @type {Promise<GroundPrimitive>}
-   * @readonly
-   * @deprecated
-   */
-  readyPromise: {
-    get: function () {
-      deprecationWarning(
-        "GroundPrimitive.readyPromise",
-        "GroundPrimitive.readyPromise was deprecated in CesiumJS 1.104. It will be removed in 1.107. Wait for GroundPrimitive.ready to return true instead."
-      );
-      return this._readyPromise;
     },
   },
 });
@@ -805,15 +763,15 @@ GroundPrimitive.prototype.update = function (frameState) {
 
     // Now compute the min/max heights for the primitive
     setMinMaxTerrainHeights(this, rectangle, ellipsoid);
-    const exaggeration = frameState.terrainExaggeration;
+    const exaggeration = frameState.verticalExaggeration;
     const exaggerationRelativeHeight =
-      frameState.terrainExaggerationRelativeHeight;
-    this._minHeight = TerrainExaggeration.getHeight(
+      frameState.verticalExaggerationRelativeHeight;
+    this._minHeight = VerticalExaggeration.getHeight(
       this._minTerrainHeight,
       exaggeration,
       exaggerationRelativeHeight
     );
-    this._maxHeight = TerrainExaggeration.getHeight(
+    this._maxHeight = VerticalExaggeration.getHeight(
       this._maxTerrainHeight,
       exaggeration,
       exaggerationRelativeHeight
@@ -942,7 +900,11 @@ GroundPrimitive.prototype.update = function (frameState) {
 
   frameState.afterRender.push(() => {
     if (!this._ready && defined(this._primitive) && this._primitive.ready) {
-      this._completeLoad();
+      this._ready = true;
+
+      if (this.releaseGeometryInstances) {
+        this.geometryInstances = undefined;
+      }
     }
   });
 };

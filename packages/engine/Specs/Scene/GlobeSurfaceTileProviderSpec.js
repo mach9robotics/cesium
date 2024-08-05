@@ -12,6 +12,7 @@ import {
   GeographicProjection,
   HeadingPitchRoll,
   Rectangle,
+  Resource,
   WebMercatorProjection,
   ContextLimits,
   RenderState,
@@ -104,6 +105,8 @@ describe(
     afterEach(function () {
       scene.imageryLayers.removeAll();
       scene.primitives.removeAll();
+      Resource._Implementations.loadWithXhr =
+        Resource._DefaultImplementations.loadWithXhr;
     });
 
     it("conforms to QuadtreeTileProvider interface", function () {
@@ -463,6 +466,58 @@ describe(
 
       await updateUntilDone(scene.globe);
       expect(scene).notToRender([0, 0, 0, 255]);
+    });
+
+    it("renders imagery layers according to show property", async function () {
+      await updateUntilDone(scene.globe);
+      let renderedRed;
+      expect(scene).toRenderAndCall((rgba) => (renderedRed = rgba[0]));
+
+      const provider = await SingleTileImageryProvider.fromUrl(
+        "Data/Images/Red16x16.png"
+      );
+      const layer = scene.imageryLayers.addImageryProvider(provider);
+
+      await updateUntilDone(scene.globe);
+      expect(scene).toRenderAndCall((rgba) =>
+        expect(rgba[0]).toBeGreaterThan(renderedRed)
+      );
+
+      layer.show = false;
+
+      await updateUntilDone(scene.globe);
+      expect(scene).toRenderAndCall((rgba) =>
+        expect(rgba[0]).toEqual(renderedRed)
+      );
+    });
+
+    it("adds imagery credits to the CreditDisplay based on show property", async function () {
+      const CreditDisplayElement = CreditDisplay.CreditDisplayElement;
+      const imageryCredit = new Credit("imagery credit");
+
+      const provider = await SingleTileImageryProvider.fromUrl(
+        "Data/Images/Red16x16.png",
+        {
+          credit: imageryCredit,
+        }
+      );
+      const layer = scene.imageryLayers.addImageryProvider(provider);
+
+      await updateUntilDone(scene.globe);
+
+      const creditDisplay = scene.frameState.creditDisplay;
+      creditDisplay.showLightbox();
+      expect(
+        creditDisplay._currentFrameCredits.lightboxCredits.values
+      ).toContain(new CreditDisplayElement(imageryCredit));
+
+      layer.show = false;
+      await updateUntilDone(scene.globe);
+      expect(
+        creditDisplay._currentFrameCredits.lightboxCredits.values
+      ).not.toContain(new CreditDisplayElement(imageryCredit));
+
+      creditDisplay.hideLightbox();
     });
 
     describe("fog", function () {
@@ -850,8 +905,41 @@ describe(
       scene.imageryLayers.addImageryProvider(provider);
 
       const terrainCredit = new Credit("terrain credit");
+
+      // Mock terrain tile loading
+      Resource._Implementations.loadWithXhr = function (
+        url,
+        responseType,
+        method,
+        data,
+        headers,
+        deferred,
+        overrideMimeType
+      ) {
+        if (defined(url.match(/\/\d+\/\d+\/\d+\.terrain/))) {
+          Resource._DefaultImplementations.loadWithXhr(
+            "Data/CesiumTerrainTileJson/tile.32bitIndices.terrain",
+            responseType,
+            method,
+            data,
+            headers,
+            deferred
+          );
+          return;
+        }
+
+        Resource._DefaultImplementations.loadWithXhr(
+          url,
+          responseType,
+          method,
+          data,
+          headers,
+          deferred,
+          overrideMimeType
+        );
+      };
       scene.terrainProvider = await CesiumTerrainProvider.fromUrl(
-        "https://s3.amazonaws.com/cesiumjs/smallTerrain",
+        "Data/CesiumTerrainTileJson/QuantizedMesh.tile.json",
         {
           credit: terrainCredit,
         }
@@ -1336,6 +1424,64 @@ describe(
 
           scene.globe.terrainExaggeration = 1.0;
           scene.globe.terrainExaggerationRelativeHeight = 0.0;
+
+          return updateUntilDone(scene.globe).then(function () {
+            forEachRenderedTile(scene.globe._surface, 1, undefined, function (
+              tile
+            ) {
+              const surfaceTile = tile.data;
+              const encoding = surfaceTile.mesh.encoding;
+              const boundingSphere =
+                surfaceTile.tileBoundingRegion.boundingSphere;
+              expect(encoding.exaggeration).toEqual(1.0);
+              expect(encoding.hasGeodeticSurfaceNormals).toEqual(false);
+              expect(boundingSphere.radius).toBeLessThan(7000000.0);
+            });
+          });
+        });
+      });
+    });
+
+    it("Detects change in vertical exaggeration", function () {
+      switchViewMode(
+        SceneMode.SCENE3D,
+        new GeographicProjection(Ellipsoid.WGS84)
+      );
+      scene.camera.flyHome(0.0);
+
+      scene.verticalExaggeration = 1.0;
+      scene.verticalExaggerationRelativeHeight = 0.0;
+
+      return updateUntilDone(scene.globe).then(function () {
+        forEachRenderedTile(scene.globe._surface, 1, undefined, function (
+          tile
+        ) {
+          const surfaceTile = tile.data;
+          const encoding = surfaceTile.mesh.encoding;
+          const boundingSphere = surfaceTile.tileBoundingRegion.boundingSphere;
+          expect(encoding.exaggeration).toEqual(1.0);
+          expect(encoding.hasGeodeticSurfaceNormals).toEqual(false);
+          expect(boundingSphere.radius).toBeLessThan(7000000.0);
+        });
+
+        scene.verticalExaggeration = 2.0;
+        scene.verticalExaggerationRelativeHeight = -1000000.0;
+
+        return updateUntilDone(scene.globe).then(function () {
+          forEachRenderedTile(scene.globe._surface, 1, undefined, function (
+            tile
+          ) {
+            const surfaceTile = tile.data;
+            const encoding = surfaceTile.mesh.encoding;
+            const boundingSphere =
+              surfaceTile.tileBoundingRegion.boundingSphere;
+            expect(encoding.exaggeration).toEqual(2.0);
+            expect(encoding.hasGeodeticSurfaceNormals).toEqual(true);
+            expect(boundingSphere.radius).toBeGreaterThan(7000000.0);
+          });
+
+          scene.verticalExaggeration = 1.0;
+          scene.verticalExaggerationRelativeHeight = 0.0;
 
           return updateUntilDone(scene.globe).then(function () {
             forEachRenderedTile(scene.globe._surface, 1, undefined, function (

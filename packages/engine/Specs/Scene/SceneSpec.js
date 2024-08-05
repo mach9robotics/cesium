@@ -523,6 +523,19 @@ describe(
       scene.destroyForSpecs();
     });
 
+    it("sets verticalExaggeration and verticalExaggerationRelativeHeight", function () {
+      const scene = createScene();
+
+      expect(scene.verticalExaggeration).toEqual(1.0);
+      expect(scene.verticalExaggerationRelativeHeight).toEqual(0.0);
+
+      scene.verticalExaggeration = 2.0;
+      scene.verticalExaggerationRelativeHeight = 100000.0;
+
+      expect(scene.verticalExaggeration).toEqual(2.0);
+      expect(scene.verticalExaggerationRelativeHeight).toEqual(100000.0);
+    });
+
     it("destroys primitive on set globe", function () {
       const scene = createScene();
       const globe = new Globe(Ellipsoid.UNIT_SPHERE);
@@ -549,6 +562,24 @@ describe(
 
       it("renders a globe", function () {
         s.globe = new Globe(Ellipsoid.UNIT_SPHERE);
+        s.camera.position = new Cartesian3(1.02, 0.0, 0.0);
+        s.camera.up = Cartesian3.clone(Cartesian3.UNIT_Z);
+        s.camera.direction = Cartesian3.negate(
+          Cartesian3.normalize(s.camera.position, new Cartesian3()),
+          new Cartesian3()
+        );
+
+        return expect(s).toRenderAndCall(function () {
+          render(s.frameState, s.globe);
+          const pixel = s._context.readPixels();
+          const blankPixel = [0, 0, 0, 0];
+          expect(pixel).not.toEqual(blankPixel);
+        });
+      });
+
+      it("renders sky atmopshere without a globe", function () {
+        s.globe = new Globe(Ellipsoid.UNIT_SPHERE);
+        s.globe.show = false;
         s.camera.position = new Cartesian3(1.02, 0.0, 0.0);
         s.camera.up = Cartesian3.clone(Cartesian3.UNIT_Z);
         s.camera.direction = Cartesian3.negate(

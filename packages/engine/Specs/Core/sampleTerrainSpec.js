@@ -4,7 +4,6 @@ import {
   CesiumTerrainProvider,
   createWorldTerrainAsync,
   defined,
-  IonResource,
   RequestScheduler,
   Resource,
   sampleTerrain,
@@ -16,25 +15,9 @@ describe("Core/sampleTerrain", function () {
     worldTerrain = await createWorldTerrainAsync();
   });
 
-  it("queries heights from deprecated world terrain", function () {
-    const positions = [
-      Cartographic.fromDegrees(86.925145, 27.988257),
-      Cartographic.fromDegrees(87.0, 28.0),
-    ];
-
-    const terrain = new CesiumTerrainProvider({
-      url: IonResource.fromAssetId(1),
-    });
-
-    return sampleTerrain(terrain, 11, positions).then(function (
-      passedPositions
-    ) {
-      expect(passedPositions).toBe(positions);
-      expect(positions[0].height).toBeGreaterThan(5000);
-      expect(positions[0].height).toBeLessThan(10000);
-      expect(positions[1].height).toBeGreaterThan(5000);
-      expect(positions[1].height).toBeLessThan(10000);
-    });
+  afterEach(function () {
+    Resource._Implementations.loadWithXhr =
+      Resource._DefaultImplementations.loadWithXhr;
   });
 
   it("queries heights", function () {
@@ -54,9 +37,42 @@ describe("Core/sampleTerrain", function () {
     });
   });
 
-  it("queries heights from Small Terrain", async function () {
+  it("queries heights from terrain without availability", async function () {
+    // Mock terrain tile loading
+    Resource._Implementations.loadWithXhr = function (
+      url,
+      responseType,
+      method,
+      data,
+      headers,
+      deferred,
+      overrideMimeType
+    ) {
+      if (defined(url.match(/\/\d+\/\d+\/\d+\.terrain/))) {
+        Resource._DefaultImplementations.loadWithXhr(
+          "Data/CesiumTerrainTileJson/11_3027_1342.terrain",
+          responseType,
+          method,
+          data,
+          headers,
+          deferred
+        );
+        return;
+      }
+
+      Resource._DefaultImplementations.loadWithXhr(
+        url,
+        responseType,
+        method,
+        data,
+        headers,
+        deferred,
+        overrideMimeType
+      );
+    };
+
     const terrainProvider = await CesiumTerrainProvider.fromUrl(
-      "https://s3.amazonaws.com/cesiumjs/smallTerrain"
+      "Data/CesiumTerrainTileJson/StandardHeightmap.tile.json"
     );
 
     const positions = [
@@ -78,6 +94,14 @@ describe("Core/sampleTerrain", function () {
     return sampleTerrain(worldTerrain, 18, positions).then(function () {
       expect(positions[0].height).toBeUndefined();
     });
+  });
+
+  it("rejects if terrain data is not available and rejectOnTileFail is true", function () {
+    const positions = [Cartographic.fromDegrees(0.0, 0.0, 0.0)];
+
+    return expectAsync(
+      sampleTerrain(worldTerrain, 18, positions, true)
+    ).toBeRejected();
   });
 
   it("fills in what it can when given a mix of positions with and without valid tiles", function () {

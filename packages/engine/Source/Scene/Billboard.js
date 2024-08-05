@@ -1166,6 +1166,13 @@ Billboard.prototype._loadImage = function () {
     that._image = undefined;
     that._imageIndexPromise = undefined;
     makeDirty(that, IMAGE_INDEX_INDEX);
+
+    const scene = that._billboardCollection._scene;
+    if (!defined(scene)) {
+      return;
+    }
+    // Request a new render in request render mode
+    scene.frameState.afterRender.push(() => true);
   }
 
   if (defined(image)) {
@@ -1178,6 +1185,13 @@ Billboard.prototype._loadImage = function () {
   this._imageIndexPromise = imageIndexPromise;
 
   if (!defined(imageIndexPromise)) {
+    return;
+  }
+
+  // If the promise has already successfully resolved, we can return immediately without waiting a frame
+  const index = atlas.getImageIndex(imageId);
+  if (defined(index) && !defined(imageSubRegion)) {
+    completeImageLoad(index);
     return;
   }
 

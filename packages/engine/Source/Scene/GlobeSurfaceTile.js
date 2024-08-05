@@ -345,14 +345,7 @@ GlobeSurfaceTile.prototype.processImagery = function (
 
     if (tileImagery.loadingImagery.state === ImageryState.PLACEHOLDER) {
       const imageryLayer = tileImagery.loadingImagery.imageryLayer;
-      // ImageryProvider.ready is deprecated. This is here for backwards compatibility
-      const imageryProvider = imageryLayer.imageryProvider;
-      if (
-        imageryLayer.ready &&
-        (defined(imageryProvider._ready)
-          ? imageryProvider._ready
-          : !defined(imageryProvider.ready) || imageryProvider.ready)
-      ) {
+      if (imageryLayer.ready) {
         // Remove the placeholder and add the actual skeletons (if any)
         // at the same position.  Then continue the loop at the same index.
         tileImagery.freeResources();
@@ -470,9 +463,9 @@ GlobeSurfaceTile.prototype.updateExaggeration = function (
   }
 
   // Check the tile's terrain encoding to see if it has been exaggerated yet
-  const exaggeration = frameState.terrainExaggeration;
+  const exaggeration = frameState.verticalExaggeration;
   const exaggerationRelativeHeight =
-    frameState.terrainExaggerationRelativeHeight;
+    frameState.verticalExaggerationRelativeHeight;
   const hasExaggerationScale = exaggeration !== 1.0;
 
   const encoding = mesh.encoding;
@@ -686,6 +679,11 @@ function upsample(surfaceTile, tile, frameState, terrainProvider, x, y, level) {
 
   Promise.resolve(terrainDataPromise)
     .then(function (terrainData) {
+      if (!defined(terrainData)) {
+        // The upsample request has been deferred - try again later.
+        return;
+      }
+
       surfaceTile.terrainData = terrainData;
       surfaceTile.terrainState = TerrainState.RECEIVED;
     })
@@ -696,6 +694,13 @@ function upsample(surfaceTile, tile, frameState, terrainProvider, x, y, level) {
 
 function requestTileGeometry(surfaceTile, terrainProvider, x, y, level) {
   function success(terrainData) {
+    if (!defined(terrainData)) {
+      // Throttled due to low priority - try again later.
+      surfaceTile.terrainState = TerrainState.UNLOADED;
+      surfaceTile.request = undefined;
+      return;
+    }
+
     surfaceTile.terrainData = terrainData;
     surfaceTile.terrainState = TerrainState.RECEIVED;
     surfaceTile.request = undefined;
@@ -785,9 +790,9 @@ function transform(surfaceTile, frameState, terrainProvider, x, y, level) {
   createMeshOptions.x = x;
   createMeshOptions.y = y;
   createMeshOptions.level = level;
-  createMeshOptions.exaggeration = frameState.terrainExaggeration;
+  createMeshOptions.exaggeration = frameState.verticalExaggeration;
   createMeshOptions.exaggerationRelativeHeight =
-    frameState.terrainExaggerationRelativeHeight;
+    frameState.verticalExaggerationRelativeHeight;
   createMeshOptions.throttle = true;
 
   const terrainData = surfaceTile.terrainData;

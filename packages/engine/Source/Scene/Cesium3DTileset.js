@@ -61,14 +61,14 @@ import Cesium3DTilesetSkipTraversal from "./Cesium3DTilesetSkipTraversal.js";
  *
  * Initialization options for the Cesium3DTileset constructor
  *
- * @property {Resource|string|Promise<Resource>|Promise<string>} [.url] The url to a tileset JSON file. Deprecated.
  * @property {boolean} [show=true] Determines if the tileset will be shown.
  * @property {Matrix4} [modelMatrix=Matrix4.IDENTITY] A 4x4 transformation matrix that transforms the tileset's root tile.
  * @property {Axis} [modelUpAxis=Axis.Y] Which axis is considered up when loading models for tile contents.
  * @property {Axis} [modelForwardAxis=Axis.X] Which axis is considered forward when loading models for tile contents.
  * @property {ShadowMode} [shadows=ShadowMode.ENABLED] Determines whether the tileset casts or receives shadows from light sources.
  * @property {number} [maximumScreenSpaceError=16] The maximum screen space error used to drive level of detail refinement.
- * @property {number} [maximumMemoryUsage=512] The maximum amount of memory in MB that can be used by the tileset.
+ * @property {number} [cacheBytes=536870912] The size (in bytes) to which the tile cache will be trimmed, if the cache contains tiles not needed for the current view.
+ * @property {number} [maximumCacheOverflowBytes=536870912] The maximum additional memory (in bytes) to allow for cache headroom, if more than {@link Cesium3DTileset#cacheBytes} are needed for the current view.
  * @property {boolean} [cullWithChildrenBounds=true] Optimization option. Whether to cull tiles using the union of their children bounding volumes.
  * @property {boolean} [cullRequestsWhileMoving=true] Optimization option. Don't request tiles that will likely be unused when they come back because of the camera's movement. This optimization only applies to stationary tilesets.
  * @property {number} [cullRequestsWhileMovingMultiplier=60.0] Optimization option. Multiplier used in culling requests while moving. Larger is more aggressive culling, smaller less aggressive culling.
@@ -221,7 +221,25 @@ function Cesium3DTileset(options) {
     options.maximumScreenSpaceError,
     16
   );
-  this._maximumMemoryUsage = defaultValue(options.maximumMemoryUsage, 512);
+  this._memoryAdjustedScreenSpaceError = this._maximumScreenSpaceError;
+
+  this._cacheBytes = defaultValue(options.cacheBytes, 512 * 1024 * 1024);
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.number.greaterThanOrEquals("cacheBytes", this._cacheBytes, 0);
+  //>>includeEnd('debug');
+
+  const maximumCacheOverflowBytes = defaultValue(
+    options.maximumCacheOverflowBytes,
+    512 * 1024 * 1024
+  );
+  //>>includeStart('debug', pragmas.debug);
+  Check.typeOf.number.greaterThanOrEquals(
+    "maximumCacheOverflowBytes",
+    maximumCacheOverflowBytes,
+    0
+  );
+  //>>includeEnd('debug');
+  this._maximumCacheOverflowBytes = maximumCacheOverflowBytes;
 
   this._styleEngine = new Cesium3DTileStyleEngine();
   this._styleApplied = false;
@@ -590,7 +608,7 @@ function Cesium3DTileset(options) {
    *     console.log('A tile was unloaded from the cache.');
    * });
    *
-   * @see Cesium3DTileset#maximumMemoryUsage
+   * @see Cesium3DTileset#cacheBytes
    * @see Cesium3DTileset#trimLoadedTiles
    */
   this.tileUnload = new Event();
@@ -990,124 +1008,6 @@ function Cesium3DTileset(options) {
     instanceFeatureIdLabel = `instanceFeatureId_${instanceFeatureIdLabel}`;
   }
   this._instanceFeatureIdLabel = instanceFeatureIdLabel;
-
-  if (defined(options.url)) {
-    deprecationWarning(
-      "Cesium3DTileset options.url",
-      "Cesium3DTileset constructor parameter options.url was deprecated in CesiumJS 1.104. It will be removed in 1.107. Use Cesium3DTileset.fromUrl instead."
-    );
-    const that = this;
-    let resource;
-    this._readyPromise = Promise.resolve(options.url)
-      .then(function (url) {
-        let basePath;
-        resource = Resource.createIfNeeded(url);
-        that._resource = resource;
-
-        // ion resources have a credits property we can use for additional attribution.
-        that._credits = resource.credits;
-
-        if (resource.extension === "json") {
-          basePath = resource.getBaseUri(true);
-        } else if (resource.isDataUri) {
-          basePath = "";
-        }
-
-        that._url = resource.url;
-        that._basePath = basePath;
-
-        return Cesium3DTileset.loadJson(resource);
-      })
-      .then(function (tilesetJson) {
-        if (that.isDestroyed()) {
-          return;
-        }
-
-        // This needs to be called before loadTileset() so tile metadata
-        // can be initialized synchronously in the Cesium3DTile constructor
-        return processMetadataExtension(resource, tilesetJson).then(
-          (metadata) => {
-            that._metadataExtension = metadata;
-            return tilesetJson;
-          }
-        );
-      })
-      .then(function (tilesetJson) {
-        if (that.isDestroyed()) {
-          return;
-        }
-
-        // Set these before loading the tileset since _geometricError
-        // and _scaledGeometricError get accessed during tile creation
-        that._geometricError = tilesetJson.geometricError;
-        that._scaledGeometricError = tilesetJson.geometricError;
-
-        that._root = that.loadTileset(resource, tilesetJson);
-
-        // Handle legacy gltfUpAxis option
-        const gltfUpAxis = defined(tilesetJson.asset.gltfUpAxis)
-          ? Axis.fromName(tilesetJson.asset.gltfUpAxis)
-          : Axis.Y;
-        const modelUpAxis = defaultValue(options.modelUpAxis, gltfUpAxis);
-        const modelForwardAxis = defaultValue(options.modelForwardAxis, Axis.X);
-
-        const asset = tilesetJson.asset;
-        that._asset = asset;
-        that._properties = tilesetJson.properties;
-        that._extensionsUsed = tilesetJson.extensionsUsed;
-        that._extensions = tilesetJson.extensions;
-        that._modelUpAxis = modelUpAxis;
-        that._modelForwardAxis = modelForwardAxis;
-        that._extras = tilesetJson.extras;
-
-        const extras = asset.extras;
-        if (
-          defined(extras) &&
-          defined(extras.cesium) &&
-          defined(extras.cesium.credits)
-        ) {
-          const extraCredits = extras.cesium.credits;
-          let credits = that._credits;
-          if (!defined(credits)) {
-            credits = [];
-            that._credits = credits;
-          }
-          for (let i = 0; i < extraCredits.length; ++i) {
-            const credit = extraCredits[i];
-            credits.push(new Credit(credit.html, that._showCreditsOnScreen));
-          }
-        }
-
-        // Save the original, untransformed bounding volume position so we can apply
-        // the tile transform and model matrix at run time
-        const boundingVolume = that._root.createBoundingVolume(
-          tilesetJson.root.boundingVolume,
-          Matrix4.IDENTITY
-        );
-        const clippingPlanesOrigin = boundingVolume.boundingSphere.center;
-        // If this origin is above the surface of the earth
-        // we want to apply an ENU orientation as our best guess of orientation.
-        // Otherwise, we assume it gets its position/orientation completely from the
-        // root tile transform and the tileset's model matrix
-        const originCartographic = that._ellipsoid.cartesianToCartographic(
-          clippingPlanesOrigin
-        );
-        if (
-          defined(originCartographic) &&
-          originCartographic.height >
-            ApproximateTerrainHeights._defaultMinTerrainHeight
-        ) {
-          that._initialClippingPlanesOriginMatrix = Transforms.eastNorthUpToFixedFrame(
-            clippingPlanesOrigin
-          );
-        }
-        that._clippingPlanesOriginMatrix = Matrix4.clone(
-          that._initialClippingPlanesOriginMatrix
-        );
-
-        return that;
-      });
-  }
 }
 
 Object.defineProperties(Cesium3DTileset.prototype, {
@@ -1193,59 +1093,6 @@ Object.defineProperties(Cesium3DTileset.prototype, {
   properties: {
     get: function () {
       return this._properties;
-    },
-  },
-
-  /**
-   * When <code>true</code>, the tileset's root tile is loaded and the tileset is ready to render.
-   *
-   * @memberof Cesium3DTileset.prototype
-   *
-   * @type {boolean}
-   * @readonly
-   *
-   * @default false
-   */
-  ready: {
-    get: function () {
-      deprecationWarning(
-        "Cesium3DTileset.ready",
-        "Cesium3DTileset.ready was deprecated in CesiumJS 1.104. It will be removed in 1.107. Use Cesium3DTileset.fromUrl instead."
-      );
-      return defined(this._root);
-    },
-  },
-
-  /**
-   * Gets the promise that will be resolved when the tileset's root tile is loaded and the tileset is ready to render.
-   * <p>
-   * This promise is resolved at the end of the frame before the first frame the tileset is rendered in.
-   * </p>
-   *
-   * @memberof Cesium3DTileset.prototype
-   *
-   * @type {Promise<Cesium3DTileset>}
-   * @readonly
-   * @deprecated
-   *
-   * @example
-   * tileset.readyPromise.then(function(tileset) {
-   *     // tile.properties is not defined until readyPromise resolves.
-   *     const properties = tileset.properties;
-   *     if (Cesium.defined(properties)) {
-   *         for (const name in properties) {
-   *             console.log(properties[name]);
-   *         }
-   *     }
-   * });
-   */
-  readyPromise: {
-    get: function () {
-      deprecationWarning(
-        "Cesium3DTileset.readyPromise",
-        "Cesium3DTileset.readyPromise was deprecated in CesiumJS 1.104. It will be removed in 1.107. Use Cesium3DTileset.fromUrl instead."
-      );
-      return this._readyPromise;
     },
   },
 
@@ -1516,11 +1363,12 @@ Object.defineProperties(Cesium3DTileset.prototype, {
       //>>includeEnd('debug');
 
       this._maximumScreenSpaceError = value;
+      this._memoryAdjustedScreenSpaceError = value;
     },
   },
 
   /**
-   * The maximum amount of GPU memory (in MB) that may be used to cache tiles. This value is estimated from
+   * The amount of GPU memory (in bytes) used to cache tiles. This memory usage is estimated from
    * geometry, textures, and batch table textures of loaded tiles. For point clouds, this value also
    * includes per-point metadata.
    * <p>
@@ -1530,32 +1378,86 @@ Object.defineProperties(Cesium3DTileset.prototype, {
    * If decreasing this value results in unloading tiles, the tiles are unloaded the next frame.
    * </p>
    * <p>
-   * If tiles sized more than <code>maximumMemoryUsage</code> are needed
-   * to meet the desired screen space error, determined by {@link Cesium3DTileset#maximumScreenSpaceError},
+   * If tiles sized more than <code>cacheBytes</code> are needed to meet the
+   * desired screen space error, determined by {@link Cesium3DTileset#maximumScreenSpaceError},
    * for the current view, then the memory usage of the tiles loaded will exceed
-   * <code>maximumMemoryUsage</code>.  For example, if the maximum is 256 MB, but
-   * 300 MB of tiles are needed to meet the screen space error, then 300 MB of tiles may be loaded.  When
-   * these tiles go out of view, they will be unloaded.
+   * <code>cacheBytes</code> by up to <code>maximumCacheOverflowBytes</code>.
+   * For example, if <code>cacheBytes</code> is 500000, but 600000 bytes
+   * of tiles are needed to meet the screen space error, then 600000 bytes of tiles
+   * may be loaded (if <code>maximumCacheOverflowBytes</code> is at least 100000).
+   * When these tiles go out of view, they will be unloaded.
    * </p>
    *
    * @memberof Cesium3DTileset.prototype
    *
    * @type {number}
-   * @default 512
+   * @default 536870912
    *
-   * @exception {DeveloperError} <code>maximumMemoryUsage</code> must be greater than or equal to zero.
+   * @exception {DeveloperError} <code>cacheBytes</code> must be typeof 'number' and greater than or equal to 0
    * @see Cesium3DTileset#totalMemoryUsageInBytes
    */
-  maximumMemoryUsage: {
+  cacheBytes: {
     get: function () {
-      return this._maximumMemoryUsage;
+      return this._cacheBytes;
     },
     set: function (value) {
       //>>includeStart('debug', pragmas.debug);
       Check.typeOf.number.greaterThanOrEquals("value", value, 0);
       //>>includeEnd('debug');
 
-      this._maximumMemoryUsage = value;
+      this._cacheBytes = value;
+    },
+  },
+
+  /**
+   * The maximum additional amount of GPU memory (in bytes) that will be used to cache tiles.
+   * <p>
+   * If tiles sized more than <code>cacheBytes</code> plus <code>maximumCacheOverflowBytes</code>
+   * are needed to meet the desired screen space error, determined by
+   * {@link Cesium3DTileset#maximumScreenSpaceError} for the current view, then
+   * {@link Cesium3DTileset#memoryAdjustedScreenSpaceError} will be adjusted
+   * until the tiles required to meet the adjusted screen space error use less
+   * than <code>cacheBytes</code> plus <code>maximumCacheOverflowBytes</code>.
+   * </p>
+   *
+   * @memberof Cesium3DTileset.prototype
+   *
+   * @type {number}
+   * @default 536870912
+   *
+   * @exception {DeveloperError} <code>maximumCacheOverflowBytes</code> must be typeof 'number' and greater than or equal to 0
+   * @see Cesium3DTileset#totalMemoryUsageInBytes
+   */
+  maximumCacheOverflowBytes: {
+    get: function () {
+      return this._maximumCacheOverflowBytes;
+    },
+    set: function (value) {
+      //>>includeStart('debug', pragmas.debug);
+      Check.typeOf.number.greaterThanOrEquals("value", value, 0);
+      //>>includeEnd('debug');
+
+      this._maximumCacheOverflowBytes = value;
+    },
+  },
+
+  /**
+   * If loading the level of detail required by @{link Cesium3DTileset#maximumScreenSpaceError}
+   * results in the memory usage exceeding @{link Cesium3DTileset#cacheBytes}
+   * plus @{link Cesium3DTileset#maximumCacheOverflowBytes}, level of detail refinement
+   * will instead use this (larger) adjusted screen space error to achieve the
+   * best possible visual quality within the available memory
+   *
+   * @memberof Cesium3DTileset.prototype
+   *
+   * @type {number}
+   * @readonly
+   *
+   * @private
+   */
+  memoryAdjustedScreenSpaceError: {
+    get: function () {
+      return this._memoryAdjustedScreenSpaceError;
     },
   },
 
@@ -1665,7 +1567,7 @@ Object.defineProperties(Cesium3DTileset.prototype, {
    * @type {number}
    * @readonly
    *
-   * @see Cesium3DTileset#maximumMemoryUsage
+   * @see Cesium3DTileset#cacheBytes
    */
   totalMemoryUsageInBytes: {
     get: function () {
@@ -1918,6 +1820,7 @@ Object.defineProperties(Cesium3DTileset.prototype, {
     },
     set: function (value) {
       this._showCreditsOnScreen = value;
+      createCredits(this);
     },
   },
 
@@ -1999,7 +1902,7 @@ Object.defineProperties(Cesium3DTileset.prototype, {
  * used for streaming massive heterogeneous 3D geospatial datasets, from a Cesium ion asset ID.
  *
  * @param {number} assetId The Cesium ion asset id.
- * @param {Cesium3DTileset.ConstructorOptions} options An object describing initialization options
+ * @param {Cesium3DTileset.ConstructorOptions} [options] An object describing initialization options
  * @returns {Promise<Cesium3DTileset>}
  *
  * @exception {DeveloperError} The tileset must be 3D Tiles version 0.0 or 1.0.
@@ -2106,24 +2009,7 @@ Cesium3DTileset.fromUrl = async function (url, options) {
   tileset._asset = asset;
   tileset._extras = tilesetJson.extras;
 
-  let credits = resource.credits;
-  if (!defined(credits)) {
-    credits = [];
-  }
-
-  const assetExtras = asset.extras;
-  if (
-    defined(assetExtras) &&
-    defined(assetExtras.cesium) &&
-    defined(assetExtras.cesium.credits)
-  ) {
-    const extraCredits = assetExtras.cesium.credits;
-    for (let i = 0; i < extraCredits.length; ++i) {
-      const credit = extraCredits[i];
-      credits.push(new Credit(credit.html, tileset._showCreditsOnScreen));
-    }
-  }
-  tileset._credits = credits;
+  createCredits(tileset);
 
   // Handle legacy gltfUpAxis option
   const gltfUpAxis = defined(tilesetJson.asset.gltfUpAxis)
@@ -2167,8 +2053,6 @@ Cesium3DTileset.fromUrl = async function (url, options) {
     tileset._initialClippingPlanesOriginMatrix
   );
 
-  tileset._readyPromise = Promise.resolve(tileset);
-  tileset._ready = true;
   return tileset;
 };
 
@@ -2524,7 +2408,7 @@ function requestContent(tileset, tile) {
   tileset._requestedTilesInFlight.push(tile);
 }
 
-function sortRequestByPriority(a, b) {
+function sortTilesByPriority(a, b) {
   return a._priority - b._priority;
 }
 
@@ -2627,7 +2511,7 @@ function cancelOutOfViewRequests(tileset, frameState) {
  */
 function requestTiles(tileset) {
   const requestedTiles = tileset._requestedTiles;
-  requestedTiles.sort(sortRequestByPriority);
+  requestedTiles.sort(sortTilesByPriority);
   for (let i = 0; i < requestedTiles.length; ++i) {
     requestContent(tileset, requestedTiles[i]);
   }
@@ -2694,10 +2578,18 @@ function filterProcessingQueue(tileset) {
 function processTiles(tileset, frameState) {
   filterProcessingQueue(tileset);
   const tiles = tileset._processingQueue;
-  const statistics = tileset._statistics;
-  let tile;
+
+  const { cacheBytes, maximumCacheOverflowBytes, statistics } = tileset;
+  const cacheByteLimit = cacheBytes + maximumCacheOverflowBytes;
+
+  let memoryExceeded = false;
   for (let i = 0; i < tiles.length; ++i) {
-    tile = tiles[i];
+    if (tileset.totalMemoryUsageInBytes > cacheByteLimit) {
+      memoryExceeded = true;
+      break;
+    }
+
+    const tile = tiles[i];
     try {
       tile.process(tileset, frameState);
 
@@ -2710,6 +2602,37 @@ function processTiles(tileset, frameState) {
       handleTileFailure(error, tileset, tile);
     }
   }
+
+  if (tileset.totalMemoryUsageInBytes < cacheBytes) {
+    decreaseScreenSpaceError(tileset);
+  } else if (memoryExceeded && tiles.length > 0) {
+    increaseScreenSpaceError(tileset);
+  }
+}
+
+function increaseScreenSpaceError(tileset) {
+  //>>includeStart('debug', pragmas.debug);
+  oneTimeWarning(
+    "increase-screenSpaceError",
+    `The tiles needed to meet maximumScreenSpaceError would use more memory than allocated for this tileset.
+    The tileset will be rendered with a larger screen space error (see memoryAdjustedScreenSpaceError).
+    Consider using larger values for cacheBytes and maximumCacheOverflowBytes.`
+  );
+  //>>includeEnd('debug');
+
+  tileset._memoryAdjustedScreenSpaceError *= 1.02;
+  const tiles = tileset._processingQueue;
+  for (let i = 0; i < tiles.length; ++i) {
+    tiles[i].updatePriority();
+  }
+  tiles.sort(sortTilesByPriority);
+}
+
+function decreaseScreenSpaceError(tileset) {
+  tileset._memoryAdjustedScreenSpaceError = Math.max(
+    tileset.memoryAdjustedScreenSpaceError / 1.02,
+    tileset.maximumScreenSpaceError
+  );
 }
 
 const scratchCartesian = new Cartesian3();
@@ -3057,7 +2980,7 @@ function destroyTile(tileset, tile) {
 /**
  * Unloads all tiles that weren't selected the previous frame.  This can be used to
  * explicitly manage the tile cache and reduce the total number of tiles loaded below
- * {@link Cesium3DTileset#maximumMemoryUsage}.
+ * {@link Cesium3DTileset#cacheBytes}.
  * <p>
  * Tile unloads occur at the next frame to keep all the WebGL delete calls
  * within the render loop.
@@ -3211,14 +3134,47 @@ function update(tileset, frameState, passStatistics, passOptions) {
     if (defined(credits) && statistics.selected !== 0) {
       for (let i = 0; i < credits.length; ++i) {
         const credit = credits[i];
-        credit.showOnScreen =
-          tileset._showCreditsOnScreen || credit._isDefaultToken;
         frameState.creditDisplay.addCreditToNextFrame(credit);
       }
     }
   }
 
   return ready;
+}
+
+function createCredits(tileset) {
+  let credits = tileset._credits;
+  if (!defined(credits)) {
+    credits = [];
+  }
+  credits.length = 0;
+
+  if (defined(tileset.resource.credits)) {
+    tileset.resource.credits.forEach((credit) => {
+      credits.push(Credit.clone(credit));
+    });
+  }
+
+  const assetExtras = tileset.asset.extras;
+  if (
+    defined(assetExtras) &&
+    defined(assetExtras.cesium) &&
+    defined(assetExtras.cesium.credits)
+  ) {
+    const extraCredits = assetExtras.cesium.credits;
+    for (let i = 0; i < extraCredits.length; ++i) {
+      const credit = extraCredits[i];
+      credits.push(new Credit(credit.html));
+    }
+  }
+
+  credits.forEach(
+    (credit) =>
+      (credit.showOnScreen =
+        credit.showOnScreen || tileset._showCreditsOnScreen)
+  );
+
+  tileset._credits = credits;
 }
 
 /**

@@ -35,6 +35,7 @@ import findGroupMetadata from "./findGroupMetadata.js";
 import findTileMetadata from "./findTileMetadata.js";
 import hasExtension from "./hasExtension.js";
 import Multiple3DTileContent from "./Multiple3DTileContent.js";
+import BoundingVolumeSemantics from "./BoundingVolumeSemantics.js";
 import preprocess3DTileContent from "./preprocess3DTileContent.js";
 import SceneMode from "./SceneMode.js";
 import TileBoundingRegion from "./TileBoundingRegion.js";
@@ -42,6 +43,7 @@ import TileBoundingS2Cell from "./TileBoundingS2Cell.js";
 import TileBoundingSphere from "./TileBoundingSphere.js";
 import TileOrientedBoundingBox from "./TileOrientedBoundingBox.js";
 import Pass from "../Renderer/Pass.js";
+import VerticalExaggeration from "../Core/VerticalExaggeration.js";
 
 /**
  * A tile in a {@link Cesium3DTileset}.  When a tile is first created, its content is not loaded;
@@ -107,6 +109,23 @@ function Cesium3DTile(tileset, baseResource, header, parent) {
    */
   this.computedTransform = computedTransform;
 
+  /**
+   * When tile metadata is present (3D Tiles 1.1) or the <code>3DTILES_metadata</code> extension is used,
+   * this stores a {@link TileMetadata} object for accessing tile metadata.
+   *
+   * @type {TileMetadata}
+   * @readonly
+   * @private
+   * @experimental This feature is using part of the 3D Tiles spec that is not final and is subject to change without Cesium's standard deprecation policy.
+   */
+  this.metadata = findTileMetadata(tileset, header);
+
+  this._verticalExaggeration = 1.0;
+  this._verticalExaggerationRelativeHeight = 0.0;
+
+  // Important: tile metadata must be parsed before this line so that the
+  // metadata semantics TILE_BOUNDING_BOX, TILE_BOUNDING_REGION, or TILE_BOUNDING_SPHERE
+  // can override header.boundingVolume (if necessary)
   this._boundingVolume = this.createBoundingVolume(
     header.boundingVolume,
     computedTransform
@@ -327,17 +346,6 @@ function Cesium3DTile(tileset, baseResource, header, parent) {
    * @private
    */
   this.hasMultipleContents = hasMultipleContents;
-
-  /**
-   * When tile metadata is present (3D Tiles 1.1) or the <code>3DTILES_metadata</code> extension is used,
-   * this stores a {@link TileMetadata} object for accessing tile metadata.
-   *
-   * @type {TileMetadata}
-   * @readonly
-   * @private
-   * @experimental This feature is using part of the 3D Tiles spec that is not final and is subject to change without Cesium's standard deprecation policy.
-   */
-  this.metadata = findTileMetadata(tileset, header);
 
   /**
    * The node in the tileset's LRU cache, used to determine when to unload a tile's content.
@@ -870,7 +878,7 @@ function isPriorityDeferred(tile, frameState) {
   );
   const sseRelaxation = tileset.foveatedInterpolationCallback(
     tileset.foveatedMinimumScreenSpaceErrorRelaxation,
-    tileset.maximumScreenSpaceError,
+    tileset.memoryAdjustedScreenSpaceError,
     normalizedFoveatedFactor
   );
   const sse =
@@ -878,7 +886,7 @@ function isPriorityDeferred(tile, frameState) {
       ? tile.parent._screenSpaceError * 0.5
       : tile._screenSpaceError;
 
-  return tileset.maximumScreenSpaceError - sseRelaxation <= sse;
+  return tileset.memoryAdjustedScreenSpaceError - sseRelaxation <= sse;
 }
 
 const scratchJulianDate = new JulianDate();
@@ -957,12 +965,11 @@ function isPriorityProgressiveResolution(tileset, tile) {
     return false;
   }
 
+  const maximumScreenSpaceError = tileset.memoryAdjustedScreenSpaceError;
   let isProgressiveResolutionTile =
-    tile._screenSpaceErrorProgressiveResolution >
-    tileset._maximumScreenSpaceError; // Mark non-SSE leaves
+    tile._screenSpaceErrorProgressiveResolution > maximumScreenSpaceError; // Mark non-SSE leaves
   tile._priorityProgressiveResolutionScreenSpaceErrorLeaf = false; // Needed for skipLOD
   const parent = tile.parent;
-  const maximumScreenSpaceError = tileset._maximumScreenSpaceError;
   const tilePasses =
     tile._screenSpaceErrorProgressiveResolution <= maximumScreenSpaceError;
   const parentFails =
@@ -1015,7 +1022,7 @@ Cesium3DTile.prototype.updateVisibility = function (frameState) {
   const parentVisibilityPlaneMask = defined(parent)
     ? parent._visibilityPlaneMask
     : CullingVolume.MASK_INDETERMINATE;
-  this.updateTransform(parentTransform);
+  this.updateTransform(parentTransform, frameState);
   this._distanceToCamera = this.distanceToTile(frameState);
   this._centerZDepth = this.distanceToTileCenter(frameState);
   this._screenSpaceError = this.getScreenSpaceError(frameState, false);
@@ -1706,11 +1713,17 @@ function createRegion(region, transform, initialTransform, result) {
     );
   }
 
+  const rectangleRegion = Rectangle.unpack(region, 0, scratchRectangle);
+
   if (defined(result)) {
+    result.rectangle = Rectangle.clone(rectangleRegion, result.rectangle);
+    result.minimumHeight = region[4];
+    result.maximumHeight = region[5];
+    // The TileBoundingRegion was already constructed with the default
+    // WGS84 ellipsoid, so keep it consistent when updating.
+    result.computeBoundingVolumes(Ellipsoid.WGS84);
     return result;
   }
-
-  const rectangleRegion = Rectangle.unpack(region, 0, scratchRectangle);
 
   return new TileBoundingRegion({
     rectangle: rectangleRegion,
@@ -1764,6 +1777,20 @@ Cesium3DTile.prototype.createBoundingVolume = function (
   transform,
   result
 ) {
+  // if explicit tile metadata includes TILE_BOUNDING_BOX, TILE_BOUNDING_REGION,
+  // or TILE_BOUNDING_SPHERE, override tile.boundingVolume.
+  const tileMetadata = this.metadata;
+  let metadataBoundingVolumeHeader;
+  if (defined(tileMetadata)) {
+    metadataBoundingVolumeHeader = BoundingVolumeSemantics.parseBoundingVolumeSemantic(
+      "TILE",
+      tileMetadata
+    );
+  }
+  if (defined(metadataBoundingVolumeHeader)) {
+    boundingVolumeHeader = metadataBoundingVolumeHeader;
+  }
+
   if (!defined(boundingVolumeHeader)) {
     throw new RuntimeError("boundingVolume must be defined");
   }
@@ -1776,26 +1803,117 @@ Cesium3DTile.prototype.createBoundingVolume = function (
 
   const { box, region, sphere } = boundingVolumeHeader;
   if (defined(box)) {
-    return createBox(box, transform, result);
+    const tileOrientedBoundingBox = createBox(box, transform, result);
+    if (this._verticalExaggeration !== 1.0) {
+      exaggerateBoundingBox(
+        tileOrientedBoundingBox,
+        this._verticalExaggeration,
+        this._verticalExaggerationRelativeHeight
+      );
+    }
+    return tileOrientedBoundingBox;
   }
   if (defined(region)) {
-    return createRegion(region, transform, this._initialTransform, result);
+    const tileBoundingVolume = createRegion(
+      region,
+      transform,
+      this._initialTransform,
+      result
+    );
+    if (this._verticalExaggeration === 1.0) {
+      return tileBoundingVolume;
+    }
+    if (tileBoundingVolume instanceof TileOrientedBoundingBox) {
+      exaggerateBoundingBox(
+        tileBoundingVolume,
+        this._verticalExaggeration,
+        this._verticalExaggerationRelativeHeight
+      );
+    } else {
+      tileBoundingVolume.minimumHeight = VerticalExaggeration.getHeight(
+        tileBoundingVolume.minimumHeight,
+        this._verticalExaggeration,
+        this._verticalExaggerationRelativeHeight
+      );
+      tileBoundingVolume.maximumHeight = VerticalExaggeration.getHeight(
+        tileBoundingVolume.maximumHeight,
+        this._verticalExaggeration,
+        this._verticalExaggerationRelativeHeight
+      );
+      tileBoundingVolume.computeBoundingVolumes(Ellipsoid.WGS84);
+    }
+    return tileBoundingVolume;
   }
   if (defined(sphere)) {
-    return createSphere(sphere, transform, result);
+    const tileBoundingSphere = createSphere(sphere, transform, result);
+    if (this._verticalExaggeration !== 1.0) {
+      const exaggeratedCenter = VerticalExaggeration.getPosition(
+        tileBoundingSphere.center,
+        Ellipsoid.WGS84,
+        this._verticalExaggeration,
+        this._verticalExaggerationRelativeHeight,
+        scratchCenter
+      );
+      const exaggeratedRadius =
+        tileBoundingSphere.radius * this._verticalExaggeration;
+      tileBoundingSphere.update(exaggeratedCenter, exaggeratedRadius);
+    }
+    return tileBoundingSphere;
   }
   throw new RuntimeError(
     "boundingVolume must contain a sphere, region, or box"
   );
 };
 
+const scratchExaggeratedCorners = Cartesian3.unpackArray(
+  new Array(8 * 3).fill(0)
+);
+
+/**
+ * Exaggerates the bounding box of a tile based on the provided exaggeration factors.
+ *
+ * @private
+ * @param {TileOrientedBoundingBox} tileOrientedBoundingBox - The oriented bounding box of the tile.
+ * @param {number} exaggeration - The exaggeration factor to apply to the tile's bounding box.
+ * @param {number} exaggerationRelativeHeight - The height relative to which exaggeration will be applied.
+ */
+function exaggerateBoundingBox(
+  tileOrientedBoundingBox,
+  exaggeration,
+  exaggerationRelativeHeight
+) {
+  const exaggeratedCorners = tileOrientedBoundingBox.boundingVolume
+    .computeCorners(scratchExaggeratedCorners)
+    .map((corner) =>
+      VerticalExaggeration.getPosition(
+        corner,
+        Ellipsoid.WGS84,
+        exaggeration,
+        exaggerationRelativeHeight,
+        corner
+      )
+    );
+  const exaggeratedBox = OrientedBoundingBox.fromPoints(
+    exaggeratedCorners,
+    scratchOrientedBoundingBox
+  );
+  tileOrientedBoundingBox.update(
+    exaggeratedBox.center,
+    exaggeratedBox.halfAxes
+  );
+}
+
 /**
  * Update the tile's transform. The transform is applied to the tile's bounding volumes.
  *
  * @private
  * @param {Matrix4} parentTransform
+ * @param {FrameState} [frameState]
  */
-Cesium3DTile.prototype.updateTransform = function (parentTransform) {
+Cesium3DTile.prototype.updateTransform = function (
+  parentTransform,
+  frameState
+) {
   parentTransform = defaultValue(parentTransform, Matrix4.IDENTITY);
   const computedTransform = Matrix4.multiplyTransformation(
     parentTransform,
@@ -1806,12 +1924,23 @@ Cesium3DTile.prototype.updateTransform = function (parentTransform) {
     computedTransform,
     this.computedTransform
   );
+  const exaggerationChanged =
+    defined(frameState) &&
+    (this._verticalExaggeration !== frameState.verticalExaggeration ||
+      this._verticalExaggerationRelativeHeight !==
+        frameState.verticalExaggerationRelativeHeight);
 
-  if (!transformChanged) {
+  if (!transformChanged && !exaggerationChanged) {
     return;
   }
-
-  Matrix4.clone(computedTransform, this.computedTransform);
+  if (transformChanged) {
+    Matrix4.clone(computedTransform, this.computedTransform);
+  }
+  if (exaggerationChanged) {
+    this._verticalExaggeration = frameState.verticalExaggeration;
+    this._verticalExaggerationRelativeHeight =
+      frameState.verticalExaggerationRelativeHeight;
+  }
 
   // Update the bounding volumes
   const header = this._header;
@@ -2004,8 +2133,8 @@ function updateContent(tile, tileset, frameState) {
  *  - clipping function (union v. intersection)
 
  * @private
- * @param {Cesium3DTile} tile 
- * @param {Cesium3DTileset} tileset 
+ * @param {Cesium3DTile} tile
+ * @param {Cesium3DTileset} tileset
  */
 function updateClippingPlanes(tile, tileset) {
   const clippingPlanes = tileset.clippingPlanes;
