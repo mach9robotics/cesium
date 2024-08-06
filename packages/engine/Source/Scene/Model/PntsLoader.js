@@ -581,39 +581,24 @@ function makeStructuralMetadata(parsedContent, customAttributeOutput) {
 
 function findBoundingBox(positions) {
   const numberOfPoints = positions.length / 3;
-  let minx = Infinity;
-  let maxx = -Infinity;
-  let miny = Infinity;
-  let maxy = -Infinity;
-  let minz = Infinity;
-  let maxz = -Infinity;
+  const ret = new Float64Array(6);
+  ret[0] = Infinity;
+  ret[1] = -Infinity;
+  ret[2] = Infinity;
+  ret[3] = -Infinity;
+  ret[4] = Infinity;
+  ret[5] = -Infinity;
   for (let i = 0; i < numberOfPoints; i++) {
-    if (minx > positions[3 * i]) {
-      minx = positions[3 * i];
-    }
-    if (maxx < positions[3 * i]) {
-      maxx = positions[3 * i];
-    }
-    if (miny > positions[3 * i + 1]) {
-      miny = positions[3 * i + 1];
-    }
-    if (maxy < positions[3 * i + 1]) {
-      maxy = positions[3 * i + 1];
-    }
-    if (minz > positions[3 * i + 2]) {
-      minz = positions[3 * i + 2];
-    }
-    if (maxz < positions[3 * i + 2]) {
-      maxz = positions[3 * i + 2];
+    for (let axis = 0; axis < 3; axis++) {
+      if (ret[2*axis] > positions[3 * i + axis]) {
+        ret[2*axis] = positions[3 * i + axis];
+      }
+      if (ret[2*axis+1] < positions[3 * i + axis]) {
+        ret[2*axis+1] = positions[3 * i + axis];
+      }
     }
   }
-  const ret = new Float64Array(6);
-  ret[0] = minx;
-  ret[1] = maxx;
-  ret[2] = miny;
-  ret[3] = maxy;
-  ret[4] = minz;
-  ret[5] = maxz;
+  
   return ret;
 }
 

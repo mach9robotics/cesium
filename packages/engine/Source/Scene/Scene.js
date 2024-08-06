@@ -4198,14 +4198,20 @@ function rayIntersectWithSphere(ray, radius, sphere) {
 }
 
 function getRayFittingTiles(root, ray, radius) {
-  const fittingTiles = [[root]];
-  for (const child of root.children) {
-    if (rayIntersectWithSphere(ray, radius, child.boundingSphere)) {
-      fittingTiles.push(getRayFittingTiles(child, ray, radius));
+  const fittingTiles = [];
+  const queue = [root];
+  while (queue.length > 0) {
+    const curTile = queue.pop();
+    for (const child of curTile.children) {
+      if (rayIntersectWithSphere(ray, radius, child.boundingSphere)) {
+        queue.push(child);
+      }
     }
+    fittingTiles.push(curTile);
   }
-  return fittingTiles.flat();
+  return fittingTiles;
 }
+
 
 // ray in in ecef
 Scene.prototype.drillPickFromRayFast = function (ray, width) {
