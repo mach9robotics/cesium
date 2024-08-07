@@ -645,7 +645,7 @@ function quicksort(positions, A, lo, mid, hi, depth, indexedTree) {
 // The partition algorithm is designed as a median pick algorithm; take the
 // low, middle, and high indicies of the array segment and take the median of 
 // the three values and uses it as the pivot for the next partition.
-function partition(positions, A, lo, hi, depth) {
+function partition(positions, pivotIndices, lo, hi, depth) {
   const axis = depth % 3;
   if (hi < lo) {
     return -1;
@@ -654,55 +654,55 @@ function partition(positions, A, lo, hi, depth) {
     return lo;
   }
   if (lo + 1 === hi) {
-    if (positions[3 * A[lo] + axis] > positions[3 * A[hi] + axis]) {
-      const temp = A[lo];
-      A[lo] = A[hi];
-      A[hi] = temp;
+    if (positions[3 * pivotIndices[lo] + axis] > positions[3 * pivotIndices[hi] + axis]) {
+      const temp = pivotIndices[lo];
+      pivotIndices[lo] = pivotIndices[hi];
+      pivotIndices[hi] = temp;
     }
     return hi;
   }
-  const mid = A[Math.floor((lo + hi) / 2)];
-  const low = positions[3 * A[lo] + axis];
+  const mid = pivotIndices[Math.floor((lo + hi) / 2)];
+  const low = positions[3 * pivotIndices[lo] + axis];
   const middle = positions[3 * mid + axis];
-  const high = positions[3 * A[hi] + axis];
+  const high = positions[3 * pivotIndices[hi] + axis];
 
-  let pivot = A[hi];
+  let pivot = pivotIndices[hi];
   let pivot_index = hi;
 
   if (low <= middle && middle <= high) {
     pivot = mid;
     pivot_index = Math.floor((lo + hi) / 2);
   } else if (middle <= high && high <= low) {
-    pivot = A[hi];
+    pivot = pivotIndices[hi];
     pivot_index = hi;
   } else if (middle <= low && low <= high) {
-    pivot = A[lo];
+    pivot = pivotIndices[lo];
     pivot_index = lo;
   } else if (low <= high && high <= middle) {
-    pivot = A[hi];
+    pivot = pivotIndices[hi];
     pivot_index = hi;
   } else if (high <= low && low <= middle ) {
-    pivot = A[lo];
+    pivot = pivotIndices[lo];
     pivot_index = lo;
   } else if (high <= middle && middle <=  low) {
     pivot = mid;
     pivot_index = Math.floor((lo + hi) / 2);
   }
-  let temp = A[hi];
-  A[hi] = pivot;
-  A[pivot_index] = temp;
+  let temp = pivotIndices[hi];
+  pivotIndices[hi] = pivot;
+  pivotIndices[pivot_index] = temp;
   let i = lo;
   for (let j = lo; j < hi; j++) {
-    if (positions[3 * A[j] + axis] <= positions[3 * pivot + axis]) {
-      const tmp = A[i];
-      A[i] = A[j];
-      A[j] = tmp;
+    if (positions[3 * pivotIndices[j] + axis] <= positions[3 * pivot + axis]) {
+      const tmp = pivotIndices[i];
+      pivotIndices[i] = pivotIndices[j];
+      pivotIndices[j] = tmp;
       i += 1;
     }
   }
-  temp = A[hi];
-  A[hi] = A[i];
-  A[i] = temp;
+  temp = pivotIndices[hi];
+  pivotIndices[hi] = pivotIndices[i];
+  pivotIndices[i] = temp;
   return i;
 }
 
