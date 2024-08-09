@@ -790,8 +790,7 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   box[3] = this._boxENU[3];
   box[4] = this._boxENU[4];
   box[5] = this._boxENU[5];
-  // bfsPrint(indexedTree, positions, box);
-  //console.log(box);
+  
   const curNode = this._beginNode;
   const depth = 0;
   const result = rayIterate(

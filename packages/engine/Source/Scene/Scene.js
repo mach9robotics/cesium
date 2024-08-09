@@ -71,6 +71,7 @@ import TweenCollection from "./TweenCollection.js";
 import View from "./View.js";
 import DebugInspector from "./DebugInspector.js";
 import Ray from "../Core/Ray.js";
+import Cesium3DTileset from "./Cesium3DTileset.js";
 
 const requestRenderAfterFrame = function (scene) {
   return function () {
@@ -4215,13 +4216,26 @@ function getRayFittingTiles(root, ray, radius) {
 
 // ray in in ecef
 Scene.prototype.drillPickFromRayFast = function (ray, width) {
-  const root_tile = this.primitives._primitives[1].root;
-  const tileset = getRayFittingTiles(root_tile, ray, width);
-  const ret = rayIntersection(tileset, ray, width);
-  if (!ret) {
+  let r = undefined;
+  let minDist = Infinity;
+  for (const tile of this.primitives._primitives) {
+    if (tile instanceof Cesium3DTileset) {
+      const root_tile = tile.root;
+      const tileset = getRayFittingTiles(root_tile, ray, width);
+      const ret = rayIntersection(tileset, ray, width);
+      if (ret) {
+        const d = distanceFromRayToPoint(ray, ret[0]);
+        if (d < minDist) {
+          r = ret;
+          minDist = d;
+        }
+      }
+    }
+  }
+  if (!r) {
     return undefined;
   }
-  return [ret[0], { content: ret[1], primitive: ret[2] }];
+  return [r[0], { content: r[1], primitive: r[2] }];
 };
 
 Scene.prototype.getVerticalIntersection = function (point, width) {
