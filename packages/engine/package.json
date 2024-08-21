@@ -1,6 +1,6 @@
 {
-  "name": "@cesium/engine",
-  "version": "2.4.1",
+  "name": "@mach9/engine",
+  "version": "2.4.4",
   "description": "CesiumJS is a JavaScript library for creating 3D globes and 2D maps in a web browser without a plugin.",
   "keywords": [
     "3D",
@@ -61,15 +61,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CesiumGS/cesium.git"
+    "url": "git+https://github.com/mach9robotics/cesium.git"
   },
   "homepage": "https://cesium.com/cesiumjs/",
   "license": "Apache-2.0",
-  "author": {
-    "name": "Cesium GS, Inc.",
-    "url": "https://cesium.com"
-  },
-  "bugs": {
-    "url": "https://github.com/CesiumGS/cesium/issues"
-  }
+  "author": "Cesium GS, Inc. (https://cesium.com) modified by mach9robotics",
+  "devDependencies": {}
 }

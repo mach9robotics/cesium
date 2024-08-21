@@ -66,12 +66,11 @@ function PntsLoader(options) {
   this._decodePromise = undefined;
   this._decodedAttributes = undefined;
   this._indexedTree = undefined;
-  this._beginNode = undefined;
+  this._beginNode = undefined; // the index of the first point in the indexed tree
   this._boxENU = undefined;
   this._rtcCenter = undefined;
   this._pointsLength = undefined;
-  this._ecefRefPoint = undefined;
-
+  this._rtcCenterEcef = undefined; // ECEF coordinates of the RTCCenter
   this._promise = undefined;
   this._error = undefined;
   this._state = ResourceLoaderState.UNLOADED;
@@ -579,73 +578,124 @@ function makeStructuralMetadata(parsedContent, customAttributeOutput) {
   });
 }
 
-function findBoundingBox(positions) {
+/**
+ * Fits a bounding box around a set of points
+ * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @returns {Float64Array} bounding box in the form [minX, maxX, minY, maxY, minZ, maxZ]
+ */
+function fitBoundingBox(positions) {
   const numberOfPoints = positions.length / 3;
-  const ret = new Float64Array(6);
-  ret[0] = Infinity;
-  ret[1] = -Infinity;
-  ret[2] = Infinity;
-  ret[3] = -Infinity;
-  ret[4] = Infinity;
-  ret[5] = -Infinity;
+  const bbox = new Float64Array(6);
+  bbox[0] = Infinity;
+  bbox[1] = -Infinity;
+  bbox[2] = Infinity;
+  bbox[3] = -Infinity;
+  bbox[4] = Infinity;
+  bbox[5] = -Infinity;
   for (let i = 0; i < numberOfPoints; i++) {
+    // for each axis x,y,z update the min and max values
     for (let axis = 0; axis < 3; axis++) {
-      if (ret[2*axis] > positions[3 * i + axis]) {
-        ret[2*axis] = positions[3 * i + axis];
+      if (bbox[2 * axis] > positions[3 * i + axis]) {
+        bbox[2 * axis] = positions[3 * i + axis];
       }
-      if (ret[2*axis+1] < positions[3 * i + axis]) {
-        ret[2*axis+1] = positions[3 * i + axis];
+      if (bbox[2 * axis + 1] < positions[3 * i + axis]) {
+        bbox[2 * axis + 1] = positions[3 * i + axis];
       }
     }
   }
-  
-  return ret;
+
+  return bbox;
 }
 
-// Function to make a 3d tree based on the x y coordinates of points
-// positions should be a Float32 Array in the form [x1, y1, z1, x2, y2, z2, ...]
-// Output will be an Int32 Array in the form [l1, r1, l2, r2, ...]
-// Where each (l, r) value will correspond to the respective point in the positions array e.g. (li, ri) <=> (xi, yi. zi)
-// l represents the index of the point's left child, and r represents the index of the points right child.
-// If l = -1, then the point does not have a left child, similarly if r = -1 then there is no right child
-function make3DTree(loader, positions) {
+/**
+ * Builds a 3D tree from a set of points
+ *
+ * Tree format:
+ * - tree[0] is the index of the root of the tree
+ * - let tree[i] be an index of a vertex of the tree; positions[ 3* tree[i], 3* tree[i] + 1, 3* tree[i] + 2] are the coordinates of the point
+ * - the left child of tree[i] is tree[2 * i], and the right child of tree[i] is tree[2 * i + 1]
+ * - tree[2 * i] = -1 means there is not left child, and tree[2 * i + 1] = -1 means there is not right child
+ */
+function make3DTree(positions) {
   const numberOfPoints = positions.length / 3;
-  const indexedTree = new Int32Array(numberOfPoints * 2);
-  const A = new Int32Array(numberOfPoints);
-  for (let i = 0; i < 2 * numberOfPoints; i++) {
-    if (i < numberOfPoints) {
-      A[i] = i;
-    }
-    indexedTree[i] = -1;
+  const tree = new Int32Array(numberOfPoints * 2);
+
+  // sortedPnts[i] is the index of the point in the sorted positions array that will be partitioned/sorted as the tree is built
+  const sortedPnts = new Int32Array(numberOfPoints);
+  for (let i = 0; i < numberOfPoints; i++) {
+    sortedPnts[i] = i;
   }
-  const boundingBox = findBoundingBox(positions);
-  const p = partition(positions, A, 0, numberOfPoints - 1, 0);
-  loader._beginNode = A[p];
-  quicksort(positions, A, 0, p, numberOfPoints - 1, 1, indexedTree);
-  return [indexedTree, boundingBox];
+  for (let i = 0; i < 2 * numberOfPoints; i++) {
+    tree[i] = -1;
+  }
+  const boundingBox = fitBoundingBox(positions);
+
+  // pointIndex of the starting point of the tree.
+  // tree[2 * p] = index of the left child of p, so positions[3 * tree[2 * p] + axis] < positions[3 * p + axis  ]
+  // tree[2 * p + 1] = index of the right child of p, so positions[3 * p + axis] < positions[3 * tree[2 * p + 1] + axis]
+  const p = partition(positions, sortedPnts, 0, numberOfPoints - 1, 0);
+
+  quicksort(positions, sortedPnts, 0, p, numberOfPoints - 1, 1, tree);
+  return [tree, sortedPnts[p], boundingBox];
 }
 
-function quicksort(positions, A, lo, mid, hi, depth, indexedTree) {
+/**
+ * Recursively sorts the array of points via sortedPnts; with every level:
+ *  1) the axis of comparison is determined by the depth of recursion as (depth % 3)
+ *  2) the pivot is chosen as the median of the first, middle, and last points' axis value in the array segment
+ *  3) the points are partitioned so that all elements less than the pivot are on the left and all elements greater than the pivot are on the right
+ *  4) the pivot is saved as a vertex in the indexedTree
+ *
+ * properties:
+ *  - tree[0] = sortedPnts[p] is the root of the tree, where p is the pivot point of the very first partition call
+ *  - tree[2 * sortedPnts[mid]] = sortedPnts[low], the index of the left child of sortedPnts[mid]
+ *  - tree[2 * sortedPnts[mid] + 1] = sortedPnts[high], the index of the right child of sortedPnts[mid]
+ *  - positions[3 * tree[mid * 2] + axis] <
+ *  positions[3 * tree[mid] + axis] <
+ *  positions[3 * tree[mid * 2 + 1] + axis]
+ *
+ * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @param {Int32Array} sortedPnts, an array of indices of the points to be partitioned
+ * @param {number} lo, the lower index of the array segment
+ * @param {number} mid, the middle index of the array segment
+ * @param {number} hi, the upper index of the array segment
+ * @param {number} depth, the depth of the recursion
+ * @param {Int32Array} tree, the 3D tree
+ */
+function quicksort(positions, sortedPnts, lo, mid, hi, depth, tree) {
   if (lo >= hi || lo < 0) {
     return;
   }
-  const p1 = partition(positions, A, lo, mid - 1, depth);
-  const p2 = partition(positions, A, mid + 1, hi, depth);
-  if (p1 > -1) {
-    indexedTree[2 * A[mid]] = A[p1];
-    quicksort(positions, A, lo, p1, mid - 1, depth + 1, indexedTree);
+  const loPivot = partition(positions, sortedPnts, lo, mid - 1, depth);
+  const hiPivot = partition(positions, sortedPnts, mid + 1, hi, depth);
+  if (loPivot > -1) {
+    tree[2 * sortedPnts[mid]] = sortedPnts[loPivot];
+    quicksort(positions, sortedPnts, lo, loPivot, mid - 1, depth + 1, tree);
   }
-  if (p2 > -1) {
-    indexedTree[2 * A[mid] + 1] = A[p2];
-    quicksort(positions, A, mid + 1, p2, hi, depth + 1, indexedTree);
+  if (hiPivot > -1) {
+    tree[2 * sortedPnts[mid] + 1] = sortedPnts[hiPivot];
+    quicksort(positions, sortedPnts, mid + 1, hiPivot, hi, depth + 1, tree);
   }
 }
 
-
+/**
+ * Partitions an array of points in-place based on the value of the points along a given axis.
+ * The given axis is determined by the depth of recursion; the pivot point is chosen as the median of the first, middle, and last points' axis value in the array segment.
+ *
+ * The partitioned array has the property:
+ *  -  for lo < i <= hi, positions[3 * sortedPnts[lo] + axis] < positions[3 * sortedPnts[i] + axis] <= positions[3 * sortedPnts[hi] + axis]
+ *
+ * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @param {Int32Array} sortedPnts, an array of indices of the points to be partitioned
+ * @param {number} lo, the lower index of the array segment
+ * @param {number} hi, the upper index of the array segment
+ * @param {number} depth, the depth of the recursion
+ * @returns {number} the index of the pivot point of the subarray between lo and hi
+ */
 // The partition algorithm is designed as a median pick algorithm; take the
-// low, middle, and high indicies of the array segment and take the median of 
+// low, middle, and high indicies of the array segment and take the median of
 // the three values and uses it as the pivot for the next partition.
-function partition(positions, pivotIndices, lo, hi, depth) {
+function partition(positions, sortedPnts, lo, hi, depth) {
   const axis = depth % 3;
   if (hi < lo) {
     return -1;
@@ -654,64 +704,89 @@ function partition(positions, pivotIndices, lo, hi, depth) {
     return lo;
   }
   if (lo + 1 === hi) {
-    if (positions[3 * pivotIndices[lo] + axis] > positions[3 * pivotIndices[hi] + axis]) {
-      const temp = pivotIndices[lo];
-      pivotIndices[lo] = pivotIndices[hi];
-      pivotIndices[hi] = temp;
+    if (
+      positions[3 * sortedPnts[lo] + axis] >
+      positions[3 * sortedPnts[hi] + axis]
+    ) {
+      const temp = sortedPnts[lo];
+      sortedPnts[lo] = sortedPnts[hi];
+      sortedPnts[hi] = temp;
     }
     return hi;
   }
-  const mid = pivotIndices[Math.floor((lo + hi) / 2)];
-  const low = positions[3 * pivotIndices[lo] + axis];
-  const middle = positions[3 * mid + axis];
-  const high = positions[3 * pivotIndices[hi] + axis];
 
-  let pivot = pivotIndices[hi];
-  let pivot_index = hi;
+  // determine the index of the appropriate pivot
+  const mid = sortedPnts[Math.floor((lo + hi) / 2)];
+  const lowVal = positions[3 * sortedPnts[lo] + axis];
+  const midVal = positions[3 * mid + axis];
+  const highVal = positions[3 * sortedPnts[hi] + axis];
 
-  if (low <= middle && middle <= high) {
-    pivot = mid;
-    pivot_index = Math.floor((lo + hi) / 2);
-  } else if (middle <= high && high <= low) {
-    pivot = pivotIndices[hi];
-    pivot_index = hi;
-  } else if (middle <= low && low <= high) {
-    pivot = pivotIndices[lo];
-    pivot_index = lo;
-  } else if (low <= high && high <= middle) {
-    pivot = pivotIndices[hi];
-    pivot_index = hi;
-  } else if (high <= low && low <= middle ) {
-    pivot = pivotIndices[lo];
-    pivot_index = lo;
-  } else if (high <= middle && middle <=  low) {
-    pivot = mid;
-    pivot_index = Math.floor((lo + hi) / 2);
+  // index of the pivot point in the positions array, divided by 3
+  let positionsPivot = sortedPnts[hi];
+  // index of the pivot point in the sortedPnts array
+  let sortedPntsPivot = hi;
+
+  if (lowVal <= midVal && midVal <= highVal) {
+    positionsPivot = mid;
+    sortedPntsPivot = Math.floor((lo + hi) / 2);
+  } else if (midVal <= highVal && highVal <= lowVal) {
+    positionsPivot = sortedPnts[hi];
+    sortedPntsPivot = hi;
+  } else if (midVal <= lowVal && lowVal <= highVal) {
+    positionsPivot = sortedPnts[lo];
+    sortedPntsPivot = lo;
+  } else if (lowVal <= highVal && highVal <= midVal) {
+    positionsPivot = sortedPnts[hi];
+    sortedPntsPivot = hi;
+  } else if (highVal <= lowVal && lowVal <= midVal) {
+    positionsPivot = sortedPnts[lo];
+    sortedPntsPivot = lo;
+  } else if (highVal <= midVal && midVal <= lowVal) {
+    positionsPivot = mid;
+    sortedPntsPivot = Math.floor((lo + hi) / 2);
   }
-  let temp = pivotIndices[hi];
-  pivotIndices[hi] = pivot;
-  pivotIndices[pivot_index] = temp;
+
+  // swap the pivot with the last element in the partition range
+  let temp = sortedPnts[hi];
+  sortedPnts[hi] = positionsPivot;
+  sortedPnts[sortedPntsPivot] = temp;
+  // partition the array so that all elements less than the pivot are on the left and all elements greater than the pivot are on the right
   let i = lo;
   for (let j = lo; j < hi; j++) {
-    if (positions[3 * pivotIndices[j] + axis] <= positions[3 * pivot + axis]) {
-      const tmp = pivotIndices[i];
-      pivotIndices[i] = pivotIndices[j];
-      pivotIndices[j] = tmp;
+    if (
+      positions[3 * sortedPnts[j] + axis] <=
+      positions[3 * positionsPivot + axis]
+    ) {
+      const tmp = sortedPnts[i];
+      sortedPnts[i] = sortedPnts[j];
+      sortedPnts[j] = tmp;
       i += 1;
     }
   }
-  temp = pivotIndices[hi];
-  pivotIndices[hi] = pivotIndices[i];
-  pivotIndices[i] = temp;
+  // swap the pivot with the element at the partition index and return the partition index
+  temp = sortedPnts[hi];
+  sortedPnts[hi] = sortedPnts[i];
+  sortedPnts[i] = temp;
   return i;
 }
 
-function float64ArrayDistance(v1, v2) {
+/**
+ * Calculates the distance between two points represented as Float64Arrays
+ * @param {Float64Array} v1, the first point as [x1, y1, z1]
+ * @param {Float64Array} v2, the second point as [x2, y2, z2]
+ * @returns {number} the distance between the two points
+ */
+function distance(v1, v2) {
   return Math.sqrt(
     (v1[0] - v2[0]) ** 2 + (v1[1] - v2[1]) ** 2 + (v1[2] - v2[2]) ** 2
   );
 }
 
+/**
+ * Normalizes a vector represented as a Float64Array
+ * @param {Float64Array} v, the vector to normalize as [x, y, z]
+ * @returns {Float64Array} the normalized vector as [x/||v||, y/||v||, z/||v||]
+ */
 function normalize(v) {
   const newVector = new Float64Array(3);
   const denom = Math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2);
@@ -757,7 +832,7 @@ function distanceFromRayToPoint(ray, point) {
   dir[0] = ray.direction.x;
   dir[1] = ray.direction.y;
   dir[2] = ray.direction.z;
-  return float64ArrayDistance(point, closestPointOnRayToPoint(point, origin, dir));
+  return distance(point, closestPointOnRayToPoint(point, origin, dir));
 }
 
 function boundingSphereOfBox(boundingBox) {
@@ -776,10 +851,16 @@ function boundingSphereOfBox(boundingBox) {
   vertex[0] = minx;
   vertex[1] = miny;
   vertex[2] = minz;
-  const radius = float64ArrayDistance(center, vertex);
+  const radius = distance(center, vertex);
   return [center, radius];
 }
 
+/**
+ * Finds the point within a radius of a ray in the ENU coordinate system of a tile that is closest to the ray
+ * @param {Ray} ray
+ * @param {number} radius
+ * @returns {Cartesian3} the point within the radius of the ray in the ENU coordinate system of a tile that is closest to the ray
+ */
 PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   const positions = this._enuCoords;
   const indexedTree = this._3DTree;
@@ -790,7 +871,7 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   box[3] = this._boxENU[3];
   box[4] = this._boxENU[4];
   box[5] = this._boxENU[5];
-  
+
   const curNode = this._beginNode;
   const depth = 0;
   const result = rayIterate(
@@ -806,7 +887,7 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
     return null;
   }
   const ecefTransformationMatrix = Transforms.eastNorthUpToFixedFrame(
-    this._ecefRefPoint
+    this._rtcCenterEcef
   );
   const ecef = matrixMultbyPointasVec(
     ecefTransformationMatrix,
@@ -815,9 +896,9 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
     result[2]
   );
   return new Cartesian3(
-    ecef[0] + this._ecefRefPoint.x,
-    ecef[1] + this._ecefRefPoint.y,
-    ecef[2] + this._ecefRefPoint.z
+    ecef[0] + this._rtcCenterEcef.x,
+    ecef[1] + this._rtcCenterEcef.y,
+    ecef[2] + this._rtcCenterEcef.z
   );
 };
 
@@ -985,15 +1066,16 @@ function makeComponents(loader, context) {
   loader._rtcCenter = parsedContent.rtcCenter;
   loader._pointsLength = parsedContent.pointsLength;
   loader._enuCoords = new Float64Array(3 * loader._pointsLength);
-  loader._ecefRefPoint = Matrix4.multiplyByPoint(
+  loader._rtcCenterEcef = Matrix4.multiplyByPoint(
     loader._transformationMatrix,
     loader._rtcCenter,
     new Cartesian3()
   );
   const enuTransformationMatrix = Matrix4.inverseTransformation(
-    Transforms.eastNorthUpToFixedFrame(loader._ecefRefPoint),
+    Transforms.eastNorthUpToFixedFrame(loader._rtcCenterEcef),
     new Matrix4()
   );
+  // convert the points of the tile into ECEF coordinates for use in the 3D Tree
   for (let i = 0; i < loader._pointsLength; i++) {
     const x = positions.typedArray[3 * i] + loader._rtcCenter.x;
     const y = positions.typedArray[3 * i + 1] + loader._rtcCenter.y;
@@ -1001,18 +1083,18 @@ function makeComponents(loader, context) {
     const ecefCoords = matrixMultbyPoint(loader._transformationMatrix, x, y, z);
     const enuCoords = matrixMultbyPointasVec(
       enuTransformationMatrix,
-      ecefCoords[0] - loader._ecefRefPoint.x,
-      ecefCoords[1] - loader._ecefRefPoint.y,
-      ecefCoords[2] - loader._ecefRefPoint.z
+      ecefCoords[0] - loader._rtcCenterEcef.x,
+      ecefCoords[1] - loader._rtcCenterEcef.y,
+      ecefCoords[2] - loader._rtcCenterEcef.z
     );
     loader._enuCoords[3 * i] = enuCoords[0];
     loader._enuCoords[3 * i + 1] = enuCoords[1];
     loader._enuCoords[3 * i + 2] = enuCoords[2];
   }
-  //loader._indexedTree = make2DTree(loader._enuCoords);
-  const treeComponents = make3DTree(loader, loader._enuCoords);
+  const treeComponents = make3DTree(loader._enuCoords);
   loader._3DTree = treeComponents[0];
-  loader._boxENU = treeComponents[1];
+  loader._beginNode = treeComponents[1];
+  loader._boxENU = treeComponents[2];
   loader._parsedContent = undefined;
   loader._arrayBuffer = undefined;
 }
