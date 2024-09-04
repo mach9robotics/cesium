@@ -913,6 +913,10 @@ function compareDistanceToRay(a, b, ray) {
   return b;
 }
 
+function doesRayIntersectSphere(ray, sphere, searchRadius) {
+  return distanceFromRayToPoint(ray, sphere[0]) <= sphere[1] + searchRadius;
+}
+
 function rayIterate(
   indexedTree,
   positions,
@@ -934,7 +938,7 @@ function rayIterate(
 
   const sphere = boundingSphereOfBox(boundingBox);
   let cur = null;
-  if (distanceFromRayToPoint(ray, sphere[0]) > sphere[1] + radius) {
+  if (!doesRayIntersectSphere(ray, sphere, radius)) {
     return null;
   }
   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
@@ -947,29 +951,35 @@ function rayIterate(
   // Left
   if (indexedTree[curNode * 2] !== -1) {
     boundingBox[2 * axis + 1] = curAxis;
-    left = rayIterate(
-      indexedTree,
-      positions,
-      ray,
-      boundingBox,
-      indexedTree[curNode * 2],
-      depth + 1,
-      radius
-    );
+    const leftSphere = boundingSphereOfBox(boundingBox);
+    if (doesRayIntersectSphere(ray, leftSphere, radius)) {
+      left = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2],
+        depth + 1,
+        radius
+      );
+    }
   }
   boundingBox[2 * axis + 1] = rightBound;
   boundingBox[2 * axis] = curAxis;
   // Right
   if (indexedTree[curNode * 2 + 1] !== -1) {
-    right = rayIterate(
-      indexedTree,
-      positions,
-      ray,
-      boundingBox,
-      indexedTree[curNode * 2 + 1],
-      depth + 1,
-      radius
-    );
+    const rightSphere = boundingSphereOfBox(boundingBox);
+    if (doesRayIntersectSphere(ray, rightSphere, radius)) {
+      right = rayIterate(
+        indexedTree,
+        positions,
+        ray,
+        boundingBox,
+        indexedTree[curNode * 2 + 1],
+        depth + 1,
+        radius
+      );
+    }
   }
   boundingBox[2 * axis] = leftBound;
   return compareDistanceToRay(cur, compareDistanceToRay(left, right, ray), ray);

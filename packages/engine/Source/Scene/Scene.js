@@ -4142,7 +4142,11 @@ function rayEcefToEnu(reference, direction) {
  * @param {number} radius
  */
 function getRayIntersectionWithTile(tile, ray, radius) {
-  if (!tile.content || !tile.content._model._loader._rtcCenterEcef) {
+  if (
+    !tile.content ||
+    !tile.content._model ||
+    !tile.content._model._loader._rtcCenterEcef
+  ) {
     return null;
   }
   const origin = pointEcefToEnu(
@@ -4224,7 +4228,7 @@ function getRayFittingTiles(root, ray, radius) {
   const queue = [root];
   while (queue.length > 0) {
     const curTile = queue.pop();
-    if (curTile.children) {
+    if (curTile && curTile.children) {
       for (const child of curTile.children) {
         if (
           distanceFromRayToPoint(ray, child.boundingSphere.center) <
