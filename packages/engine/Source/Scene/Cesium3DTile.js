@@ -495,6 +495,9 @@ function Cesium3DTile(tileset, baseResource, header, parent) {
   this._colorDirty = false;
 
   this._request = undefined;
+
+  // whether this tile is marked immune from culling
+  this._persist = false;
 }
 
 // This can be overridden for testing purposes
@@ -770,6 +773,20 @@ Object.defineProperties(Cesium3DTile.prototype, {
       return this._commandsLength;
     },
   },
+
+  /**
+   * Whether this tile is marked immune from culling.
+   *
+   * @type {boolean}
+   * @readonly
+   *
+   * @private
+   */
+  persist: {
+    get: function () {
+      return this._persist;
+    },
+  },
 });
 
 const scratchCartesian = new Cartesian3();
@@ -1041,6 +1058,20 @@ Cesium3DTile.prototype.updateVisibility = function (frameState) {
   this.priorityDeferred = isPriorityDeferred(this, frameState);
 
   this._updatedVisibilityFrame = tileset._updatedVisibilityFrame;
+};
+
+/**
+ * Marks the tile as immune from culling.
+ */
+Cesium3DTile.prototype.persistTile = function () {
+  this._persist = true;
+};
+
+/**
+ * Marks the tile as free for culling
+ */
+Cesium3DTile.prototype.freeTile = function () {
+  this._persist = false;
 };
 
 /**

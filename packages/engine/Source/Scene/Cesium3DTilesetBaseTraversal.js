@@ -116,7 +116,7 @@ function updateAndPushChildren(tile, stack, frameState) {
 
   for (let i = 0; i < children.length; ++i) {
     const child = children[i];
-    if (child.isVisible) {
+    if (child.isVisible || child.persist) {
       stack.push(child);
       if (child._foveatedFactor < minimumPriority) {
         minIndex = i;

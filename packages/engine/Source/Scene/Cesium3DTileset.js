@@ -2598,6 +2598,10 @@ function cancelOutOfViewRequests(tileset, frameState) {
   for (let i = 0; i < requestedTilesInFlight.length; ++i) {
     const tile = requestedTilesInFlight[i];
 
+    // if the tile is market as persist, we don't want to cancel the request
+    if (tile.persist) {
+      continue;
+    }
     // NOTE: This is framerate dependant so make sure the threshold check is small
     const outOfView = frameState.frameNumber - tile._touchedFrame >= 1;
     if (tile._contentState !== Cesium3DTileContentState.LOADING) {

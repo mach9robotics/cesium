@@ -4216,6 +4216,29 @@ function distanceFromRayToPoint(ray, point) {
   return Cartesian3.distance(point, closestPointOnRayToPoint(ray, point));
 }
 
+const scratchDirection = new Cartesian3();
+const scratchRay = new Ray();
+/**
+ * find the distance between a point and the closest point on a line segment.
+ */
+function distanceFromSegmentToPoint(segmentStart, segmentEnd, point) {
+  scratchRay.origin = segmentStart;
+  scratchRay.direction = Cartesian3.subtract(
+    segmentEnd,
+    segmentStart,
+    scratchDirection
+  );
+  return Cartesian3.distance(point, closestPointOnRayToPoint(scratchRay, point));
+}
+
+function isRayIntersectingTile(tile, ray, radius) {
+  return distanceFromSegmentToPoint(ray.origin, ray.direction, tile.boundingSphere.center) < tile.boundingSphere.radius + radius;
+}
+
+function isSegmentIntersectingTile(tile, segmentStart, segmentEnd, radius) {
+  return distanceFromSegmentToPoint(segmentStart, segmentEnd, tile.boundingSphere.center) < tile.boundingSphere.radius + radius;
+}
+
 /**
  * Finds tiles of a tileset that are potentially intersected by a ray.
  * @param {Cesium3DTile} root tile of the tileset, whose children are to be evaluated for intersection
@@ -4230,10 +4253,31 @@ function getRayFittingTiles(root, ray, radius) {
     const curTile = queue.pop();
     if (curTile && curTile.children) {
       for (const child of curTile.children) {
-        if (
-          distanceFromRayToPoint(ray, child.boundingSphere.center) <
-          radius + child.boundingSphere.radius
-        ) {
+        if (isRayIntersectingTile(child, ray, radius)) {
+          queue.push(child);
+        }
+      }
+      fittingTiles.push(curTile);
+    }
+  }
+  return fittingTiles;
+}
+
+/**
+ * Finds tiles of a tileset that are intersected by a line segment
+ * @param {Cesium3DTile} root tile of the tileset, whose children are to be evaluated for intersection
+ * @param {Cartesian3} segmentStart start of the line segment
+ * @param {Cartesian3} segmentEnd end of the line segment
+ * @returns {Cesium3DTile[]} Array of tiles that are intersected by the line segment
+ */
+function getSegmentFittingTiles(root, segmentStart, segmentEnd, radius) {
+  const fittingTiles = [];
+  const queue = [root];
+  while (queue.length > 0) {
+    const curTile = queue.pop();
+    if (curTile && curTile.children) {
+      for (const child of curTile.children) {
+        if (isSegmentIntersectingTile(child, segmentStart, segmentEnd, radius)) {
           queue.push(child);
         }
       }
@@ -4254,9 +4298,9 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
   let minDist = Infinity;
 
   // iterate through all the valid Cesium3dTilesets, and evaluate picking against them
-  for (const tile of this.primitives._primitives) {
-    if (tile instanceof Cesium3DTileset) {
-      const root_tile = tile.root;
+  for (const primitive of this.primitives._primitives) {
+    if (primitive instanceof Cesium3DTileset) {
+      const root_tile = primitive.root;
       // determine the tiles of the Cesium3DTileset that could be intersected by the ray
       const tileset = getRayFittingTiles(root_tile, ray, width);
       const intersection = rayIntersection(tileset, ray, width);
@@ -4277,6 +4321,27 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
     { content: bestIntersection[1], primitive: bestIntersection[2] },
   ];
 };
+
+/**
+ * Loads tiles along a segment.
+ * @param {Cartesian3} segmentStart start of the segment
+ * @param {Cartesian3} segmentEnd end of the segment
+ * @returns {Cesium3DTile[]} Array of tiles that are intersected by the line segment; these should be manually free'd later
+ */
+Scene.prototype.loadTilesAlongSegment = function (segmentStart, segmentEnd) {
+  for (const primitive of this.primitives._primitives) {
+    if (primitive instanceof Cesium3DTileset) {
+      const tiles = getSegmentFittingTiles(primitive.root, segmentStart, segmentEnd, 0.1);
+      console.log("persisting tiles:", tiles.length);
+      for (const tile of tiles) {
+        // once marked as persisted, the tile will be automatically loaded?
+        tile.persistTile();
+      }
+      return tiles;
+    }
+  }
+};
+
 
 Scene.prototype.getVerticalIntersection = function (point, width) {
   return this._picking.getVerticalIntersection(this, point, width);
