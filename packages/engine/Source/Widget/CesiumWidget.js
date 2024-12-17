@@ -183,6 +183,7 @@ function configureCameraFrustum(widget) {
  */
 function CesiumWidget(container, options) {
   //>>includeStart('debug', pragmas.debug);
+  console.log("starting cesium widget");
   if (!defined(container)) {
     throw new DeveloperError("container is required.");
   }
@@ -276,6 +277,7 @@ function CesiumWidget(container, options) {
   configureCanvasSize(this);
 
   try {
+    console.log("creating scene");
     const scene = new Scene({
       canvas: canvas,
       contextOptions: options.contextOptions,

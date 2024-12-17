@@ -286,6 +286,7 @@ export async function createCesiumJs() {
     const declarations = files.map((file) =>
       generateDeclaration(workspace, file)
     );
+    console.log(declarations);
     contents += declarations.join(`${EOL}`);
     contents += "\n";
   }

@@ -131,7 +131,9 @@ function Scene(options) {
   }
   //>>includeEnd('debug');
   const hasCreditContainer = defined(creditContainer);
+  console.log("canvas:", canvas, "contextOptions:", contextOptions);
   const context = new Context(canvas, contextOptions);
+  console.log("finisehd creating context");
   if (!hasCreditContainer) {
     creditContainer = document.createElement("div");
     creditContainer.style.position = "absolute";
@@ -4228,15 +4230,38 @@ function distanceFromSegmentToPoint(segmentStart, segmentEnd, point) {
     segmentStart,
     scratchDirection
   );
-  return Cartesian3.distance(point, closestPointOnRayToPoint(scratchRay, point));
+  return Cartesian3.distance(
+    point,
+    closestPointOnRayToPoint(scratchRay, point)
+  );
 }
 
 function isRayIntersectingTile(tile, ray, radius) {
-  return distanceFromSegmentToPoint(ray.origin, ray.direction, tile.boundingSphere.center) < tile.boundingSphere.radius + radius;
+  return (
+    distanceFromSegmentToPoint(
+      ray.origin,
+      ray.direction,
+      tile.boundingSphere.center
+    ) <
+    tile.boundingSphere.radius + radius
+  );
 }
 
 function isSegmentIntersectingTile(tile, segmentStart, segmentEnd, radius) {
-  return distanceFromSegmentToPoint(segmentStart, segmentEnd, tile.boundingSphere.center) < tile.boundingSphere.radius + radius;
+  const tileDistance = distanceFromSegmentToPoint(
+    segmentStart,
+    segmentEnd,
+    tile.boundingSphere.center
+  );
+  console.log(
+    "tile",
+    tile._header.content.uri,
+    "tileDistance",
+    tileDistance,
+    "checkRadius",
+    tile.boundingSphere.radius + radius
+  );
+  return tileDistance < tile.boundingSphere.radius + radius;
 }
 
 /**
@@ -4276,12 +4301,22 @@ function getSegmentFittingTiles(root, segmentStart, segmentEnd, radius) {
   while (queue.length > 0) {
     const curTile = queue.pop();
     if (curTile && curTile.children) {
-      for (const child of curTile.children) {
-        if (isSegmentIntersectingTile(child, segmentStart, segmentEnd, radius)) {
+      if (
+        isSegmentIntersectingTile(curTile, segmentStart, segmentEnd, radius)
+      ) {
+        console.log(
+          "intersecting tile!",
+          curTile._header.content.uri,
+          "children",
+          curTile.children.length,
+          curTile.children.map((c) => c._header.content.uri)
+        );
+        fittingTiles.push(curTile);
+        // we only push if the tile is intersectin, because if not, there's no use checking the children
+        for (const child of curTile.children) {
           queue.push(child);
         }
       }
-      fittingTiles.push(curTile);
     }
   }
   return fittingTiles;
@@ -4329,19 +4364,28 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
  * @returns {Cesium3DTile[]} Array of tiles that are intersected by the line segment; these should be manually free'd later
  */
 Scene.prototype.loadTilesAlongSegment = function (segmentStart, segmentEnd) {
+  console.log("primitives", this.primitives._primitives);
+  console.log("segmentStart", segmentStart, "segmentEnd", segmentEnd);
+  const persistTiles = [];
   for (const primitive of this.primitives._primitives) {
     if (primitive instanceof Cesium3DTileset) {
-      const tiles = getSegmentFittingTiles(primitive.root, segmentStart, segmentEnd, 0.1);
+      console.log("evaluating primitive", primitive.root._header.content.uri);
+      const tiles = getSegmentFittingTiles(
+        primitive.root,
+        segmentStart,
+        segmentEnd,
+        0.1
+      );
       console.log("persisting tiles:", tiles.length);
+      persistTiles.push(...tiles);
       for (const tile of tiles) {
         // once marked as persisted, the tile will be automatically loaded?
         tile.persistTile();
       }
-      return tiles;
     }
   }
+  return persistTiles;
 };
-
 
 Scene.prototype.getVerticalIntersection = function (point, width) {
   return this._picking.getVerticalIntersection(this, point, width);

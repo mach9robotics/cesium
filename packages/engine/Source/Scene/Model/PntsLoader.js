@@ -580,7 +580,7 @@ function makeStructuralMetadata(parsedContent, customAttributeOutput) {
 
 /**
  * Fits a bounding box around a set of points
- * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @param {Float32Array} positions as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
  * @returns {Float64Array} bounding box in the form [minX, maxX, minY, maxY, minZ, maxZ]
  */
 function fitBoundingBox(positions) {
@@ -654,13 +654,13 @@ function make3DTree(positions) {
  *  positions[3 * tree[mid] + axis] <
  *  positions[3 * tree[mid * 2 + 1] + axis]
  *
- * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
- * @param {Int32Array} sortedPnts, an array of indices of the points to be partitioned
- * @param {number} lo, the lower index of the array segment
- * @param {number} mid, the middle index of the array segment
- * @param {number} hi, the upper index of the array segment
- * @param {number} depth, the depth of the recursion
- * @param {Int32Array} tree, the 3D tree
+ * @param {Float32Array} positions as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @param {Int32Array} sortedPnts an array of indices of the points to be partitioned
+ * @param {number} lo the lower index of the array segment
+ * @param {number} mid the middle index of the array segment
+ * @param {number} hi the upper index of the array segment
+ * @param {number} depth the depth of the recursion
+ * @param {Int32Array} tree the 3D tree
  */
 function quicksort(positions, sortedPnts, lo, mid, hi, depth, tree) {
   if (lo >= hi || lo < 0) {
@@ -685,11 +685,11 @@ function quicksort(positions, sortedPnts, lo, mid, hi, depth, tree) {
  * The partitioned array has the property:
  *  -  for lo < i <= hi, positions[3 * sortedPnts[lo] + axis] < positions[3 * sortedPnts[i] + axis] <= positions[3 * sortedPnts[hi] + axis]
  *
- * @param {Float32Array} positions, as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
- * @param {Int32Array} sortedPnts, an array of indices of the points to be partitioned
- * @param {number} lo, the lower index of the array segment
- * @param {number} hi, the upper index of the array segment
- * @param {number} depth, the depth of the recursion
+ * @param {Float32Array} positions as an array of x, y, z coordinates packed as [x1, y1, z1, x2, y2, z2, ...]
+ * @param {Int32Array} sortedPnts an array of indices of the points to be partitioned
+ * @param {number} lo the lower index of the array segment
+ * @param {number} hi the upper index of the array segment
+ * @param {number} depth the depth of the recursion
  * @returns {number} the index of the pivot point of the subarray between lo and hi
  */
 // The partition algorithm is designed as a median pick algorithm; take the
@@ -772,8 +772,8 @@ function partition(positions, sortedPnts, lo, hi, depth) {
 
 /**
  * Calculates the distance between two points represented as Float64Arrays
- * @param {Float64Array} v1, the first point as [x1, y1, z1]
- * @param {Float64Array} v2, the second point as [x2, y2, z2]
+ * @param {Float64Array} v1 the first point as [x1, y1, z1]
+ * @param {Float64Array} v2 the second point as [x2, y2, z2]
  * @returns {number} the distance between the two points
  */
 function distance(v1, v2) {
@@ -784,7 +784,7 @@ function distance(v1, v2) {
 
 /**
  * Normalizes a vector represented as a Float64Array
- * @param {Float64Array} v, the vector to normalize as [x, y, z]
+ * @param {Float64Array} v the vector to normalize as [x, y, z]
  * @returns {Float64Array} the normalized vector as [x/||v||, y/||v||, z/||v||]
  */
 function normalize(v) {
@@ -854,6 +854,8 @@ function boundingSphereOfBox(boundingBox) {
   const radius = distance(center, vertex);
   return [center, radius];
 }
+let totalDepth = 0;
+let foundPoints = 0;
 
 /**
  * Finds the point within a radius of a ray in the ENU coordinate system of a tile that is closest to the ray
@@ -885,6 +887,14 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   );
   if (!result) {
     return null;
+  }
+  if (foundPoints % 100 === 0) {
+    console.log(
+      "average depth after",
+      foundPoints,
+      "is",
+      totalDepth / foundPoints
+    );
   }
   const ecefTransformationMatrix = Transforms.eastNorthUpToFixedFrame(
     this._rtcCenterEcef
@@ -942,7 +952,9 @@ function rayIterate(
     return null;
   }
   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
+    totalDepth += depth;
     cur = curPoint;
+    foundPoints++;
   }
   const leftBound = boundingBox[2 * axis];
   const rightBound = boundingBox[2 * axis + 1];

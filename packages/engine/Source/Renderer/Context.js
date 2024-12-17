@@ -42,6 +42,7 @@ function Context(canvas, options) {
   //>>includeStart('debug', pragmas.debug);
   Check.defined("canvas", canvas);
   //>>includeEnd('debug');
+  console.log("starting Context");
 
   const {
     getWebGLStub,
@@ -120,6 +121,7 @@ function Context(canvas, options) {
     : 0;
 
   const aliasedLineWidthRange = gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE); // must include 1
+  console.log("aliasedLineWidthRange", aliasedLineWidthRange);
   ContextLimits._minimumAliasedLineWidth = aliasedLineWidthRange[0];
   ContextLimits._maximumAliasedLineWidth = aliasedLineWidthRange[1];
 
