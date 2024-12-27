@@ -4158,7 +4158,7 @@ function getRayIntersectionWithTile(tile, ray, radius) {
     ray.direction
   );
   const enuRay = new Ray(origin, direction);
-  const result = tile.content._model._loader.findPointsWithinRadiusOfRay(
+  const result = tile.content._model._loader.findPointsWithinRadiusOfRayWithFinger(
     enuRay,
     radius
   );
@@ -4223,7 +4223,7 @@ function distanceFromRayToPoint(ray, point) {
  * @param {number} radius
  * @returns {Cesium3DTile[]} Array of tiles that are potentially intersected by the ray.
  */
-function getRayFittingTiles(root, ray, radius) {
+function getRayFittingTiles(root, ray, radius, finger) {
   const fittingTiles = [];
   const queue = [root];
   while (queue.length > 0) {
@@ -4269,6 +4269,40 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
       }
     }
   }
+  if (!bestIntersection) {
+    return undefined;
+  }
+  return [
+    bestIntersection[0],
+    { content: bestIntersection[1], primitive: bestIntersection[2] },
+  ];
+};
+
+// we cache the intersection of the ray with the tileset at this layer; the finger stores the tileset of interest
+Scene.prototype.drillPickFromRayFastWithFinger = function (ray, width) {
+  let bestIntersection;
+  let minDist = Infinity;
+
+  for (const tile of this.primitives._primitives) {
+    // console.log("tile", tile)
+    if (tile instanceof Cesium3DTileset) {
+      // const searchTiles = tile._drillPickFinger.length > 0 ? tile._drillPickFinger : [tile.root];
+      // // determine the tiles of the Cesium3DTileset that could be intersected by the ray
+      // console.log('search tiles', searchTiles)
+      // const tileset = getRayFittingTilesWithFinger(searchTiles, ray, width);
+      // tile._drillPickFinger = tileset;
+      const tileset = getRayFittingTiles(tile.root, ray, width);
+      const intersection = rayIntersection(tileset, ray, width);
+      if (intersection) {
+        const dist = distanceFromRayToPoint(ray, intersection[0]);
+        if (dist < minDist) {
+          bestIntersection = intersection;
+          minDist = dist;
+        }
+      }
+    }
+  }
+
   if (!bestIntersection) {
     return undefined;
   }

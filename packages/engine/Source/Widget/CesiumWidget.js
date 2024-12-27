@@ -182,6 +182,7 @@ function configureCameraFrustum(widget) {
  * });
  */
 function CesiumWidget(container, options) {
+  console.log("creating new cesium widget, cesium-2, in-1108");
   //>>includeStart('debug', pragmas.debug);
   if (!defined(container)) {
     throw new DeveloperError("container is required.");

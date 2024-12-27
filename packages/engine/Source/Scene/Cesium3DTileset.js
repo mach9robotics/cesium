@@ -203,6 +203,9 @@ function Cesium3DTileset(options) {
   this._previousModelMatrix = undefined;
   this._extras = undefined;
   this._credits = undefined;
+  this._drillPickFinger = {
+    intersectingTiles: [],
+  };
 
   this._showCreditsOnScreen = defaultValue(options.showCreditsOnScreen, false);
 
@@ -2656,8 +2659,8 @@ function handleTileFailure(error, tileset, tile) {
       message: message,
     });
   } else {
-    console.log(`A 3D tile failed to load: ${url}`);
-    console.log(`Error: ${message}`);
+    // console.log(`A 3D tile failed to load: ${url}`);
+    // console.log(`Error: ${message}`);
   }
 }
 
