@@ -2538,7 +2538,7 @@ function executeCommands(scene, passState) {
       us.updatePass(Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW);
       commands =
         frustumCommands.commands[
-        Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW
+          Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW
         ];
       length =
         frustumCommands.indices[Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW];
@@ -3219,7 +3219,7 @@ Scene.prototype.updateEnvironment = function () {
 
   const occluder =
     frameState.mode === SceneMode.SCENE3D &&
-      !globeTranslucencyState.sunVisibleThroughGlobe
+    !globeTranslucencyState.sunVisibleThroughGlobe
       ? frameState.occluder
       : undefined;
   let cullingVolume = frameState.cullingVolume;
@@ -4141,7 +4141,7 @@ function rayEcefToEnu(reference, direction) {
  * @param {Ray} ray
  * @param {number} radius
  */
-function getRayIntersectionWithTileWithFinger(tile, ray, radius, verbose, uri) {
+function getRayIntersectionWithTileWithFinger(tile, ray, radius, verbose) {
   if (
     !tile.content ||
     !tile.content._model ||
@@ -4161,8 +4161,7 @@ function getRayIntersectionWithTileWithFinger(tile, ray, radius, verbose, uri) {
   const result = tile.content._model._loader.findPointsWithinRadiusOfRayWithFinger(
     enuRay,
     radius,
-    verbose,
-    uri
+    verbose
   );
   return result;
 }
@@ -4194,49 +4193,32 @@ function getRayIntersectionWithTile(tile, ray, radius) {
 function rayIntersection(tileset, ray, radius) {
   let minDist = Infinity;
   let bestIntersection;
-  let unableToCheckCount = 0;
   for (const tile of tileset) {
     const intersectionWithTile = getRayIntersectionWithTile(tile, ray, radius);
-    if (intersectionWithTile === -1) {
-      unableToCheckCount++;
-    }
     if (intersectionWithTile && intersectionWithTile !== -1) {
       const dist = distanceFromRayToPoint(ray, intersectionWithTile);
       if (dist < minDist) {
         const content = tile._content;
         minDist = dist;
         bestIntersection = [intersectionWithTile, content, tile._tileset];
-        if (tile._header.content.uri !== 'root.b3dm') {
-          // console.log('improving to:', tile._header.content.uri);
-        }
       }
     }
   }
-  // console.log("actually could check:", (tileset.length - unableToCheckCount) / tileset.length);
   return bestIntersection;
 }
 
-let previousTileset = new Set();
 function rayIntersectionWithFinger(tileset, ray, radius) {
   let minDist = Infinity;
   let bestIntersection;
-  let unableToCheckCount = 0;
-  let intersections = [];
   for (const tile of tileset) {
-    // let verbose = tile._header?.content?.uri === '3-3-5-2.pnts';
-    // if (verbose) {
-    //   console.log("verbose", verbose, "tile:", tile._header.content.uri);
-    // }
-
-    const intersectionWithTile = getRayIntersectionWithTileWithFinger(tile, ray, radius, false, tile?._header?.content?.uri);
-    if (intersectionWithTile === -1) {
-      unableToCheckCount++;
-    }
+    const intersectionWithTile = getRayIntersectionWithTileWithFinger(
+      tile,
+      ray,
+      radius,
+      false
+    );
     if (intersectionWithTile && intersectionWithTile !== -1) {
       const dist = distanceFromRayToPoint(ray, intersectionWithTile);
-      if (tile._header?.content?.uri) {
-        intersections.push([tile._header?.content?.uri, intersectionWithTile, dist]);
-      }
       if (dist < minDist) {
         const content = tile._content;
         minDist = dist;
@@ -4244,7 +4226,6 @@ function rayIntersectionWithFinger(tileset, ray, radius) {
       }
     }
   }
-  // console.log("intersections", intersections);
   return bestIntersection;
 }
 

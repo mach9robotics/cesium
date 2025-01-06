@@ -203,9 +203,6 @@ function Cesium3DTileset(options) {
   this._previousModelMatrix = undefined;
   this._extras = undefined;
   this._credits = undefined;
-  this._drillPickFinger = {
-    intersectingTiles: [],
-  };
 
   this._showCreditsOnScreen = defaultValue(options.showCreditsOnScreen, false);
 
