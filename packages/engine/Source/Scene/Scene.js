@@ -4141,13 +4141,38 @@ function rayEcefToEnu(reference, direction) {
  * @param {Ray} ray
  * @param {number} radius
  */
+function getRayIntersectionWithTileWithFinger(tile, ray, radius, verbose) {
+  if (
+    !tile.content ||
+    !tile.content._model ||
+    !tile.content._model._loader._rtcCenterEcef
+  ) {
+    return -1;
+  }
+  const origin = pointEcefToEnu(
+    tile._content._model._loader._rtcCenterEcef,
+    ray.origin
+  );
+  const direction = rayEcefToEnu(
+    tile.content._model._loader._rtcCenterEcef,
+    ray.direction
+  );
+  const enuRay = new Ray(origin, direction);
+  const result = tile.content._model._loader.findPointsWithinRadiusOfRayWithFinger(
+    enuRay,
+    radius,
+    verbose
+  );
+  return result;
+}
+
 function getRayIntersectionWithTile(tile, ray, radius) {
   if (
     !tile.content ||
     !tile.content._model ||
     !tile.content._model._loader._rtcCenterEcef
   ) {
-    return null;
+    return -1;
   }
   const origin = pointEcefToEnu(
     tile._content._model._loader._rtcCenterEcef,
@@ -4170,7 +4195,29 @@ function rayIntersection(tileset, ray, radius) {
   let bestIntersection;
   for (const tile of tileset) {
     const intersectionWithTile = getRayIntersectionWithTile(tile, ray, radius);
-    if (intersectionWithTile) {
+    if (intersectionWithTile && intersectionWithTile !== -1) {
+      const dist = distanceFromRayToPoint(ray, intersectionWithTile);
+      if (dist < minDist) {
+        const content = tile._content;
+        minDist = dist;
+        bestIntersection = [intersectionWithTile, content, tile._tileset];
+      }
+    }
+  }
+  return bestIntersection;
+}
+
+function rayIntersectionWithFinger(tileset, ray, radius) {
+  let minDist = Infinity;
+  let bestIntersection;
+  for (const tile of tileset) {
+    const intersectionWithTile = getRayIntersectionWithTileWithFinger(
+      tile,
+      ray,
+      radius,
+      false
+    );
+    if (intersectionWithTile && intersectionWithTile !== -1) {
       const dist = distanceFromRayToPoint(ray, intersectionWithTile);
       if (dist < minDist) {
         const content = tile._content;
@@ -4223,7 +4270,7 @@ function distanceFromRayToPoint(ray, point) {
  * @param {number} radius
  * @returns {Cesium3DTile[]} Array of tiles that are potentially intersected by the ray.
  */
-function getRayFittingTiles(root, ray, radius) {
+function getRayFittingTiles(root, ray, radius, finger) {
   const fittingTiles = [];
   const queue = [root];
   while (queue.length > 0) {
@@ -4234,7 +4281,7 @@ function getRayFittingTiles(root, ray, radius) {
           distanceFromRayToPoint(ray, child.boundingSphere.center) <
           radius + child.boundingSphere.radius
         ) {
-          queue.push(child);
+          queue.unshift(child);
         }
       }
       fittingTiles.push(curTile);
@@ -4260,6 +4307,41 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
       // determine the tiles of the Cesium3DTileset that could be intersected by the ray
       const tileset = getRayFittingTiles(root_tile, ray, width);
       const intersection = rayIntersection(tileset, ray, width);
+      if (intersection) {
+        const dist = distanceFromRayToPoint(ray, intersection[0]);
+        if (dist < minDist) {
+          bestIntersection = intersection;
+          minDist = dist;
+        }
+      }
+    }
+  }
+  if (!bestIntersection) {
+    return undefined;
+  }
+  return [
+    bestIntersection[0],
+    { content: bestIntersection[1], primitive: bestIntersection[2] },
+  ];
+};
+
+/**
+ * Returns the best pick location against all the cesium3D Tilesets in the scene.
+ *
+ * @param {Ray} ray
+ * @param {number} width
+ */
+Scene.prototype.drillPickFromRayFastWithFinger = function (ray, width) {
+  let bestIntersection;
+  let minDist = Infinity;
+
+  // iterate through all the valid Cesium3dTilesets, and evaluate picking against them
+  for (const tile of this.primitives._primitives) {
+    if (tile instanceof Cesium3DTileset) {
+      const root_tile = tile.root;
+      // determine the tiles of the Cesium3DTileset that could be intersected by the ray
+      const tileset = getRayFittingTiles(root_tile, ray, width);
+      const intersection = rayIntersectionWithFinger(tileset, ray, width);
       if (intersection) {
         const dist = distanceFromRayToPoint(ray, intersection[0]);
         if (dist < minDist) {
