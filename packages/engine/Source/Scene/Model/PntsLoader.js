@@ -903,75 +903,15 @@ PntsLoader.prototype.findPointsWithinRadiusOfRay = function (ray, radius) {
   );
 };
 
-// // on the points layer, the finger stores the individual index of interest
-// PntsLoader.prototype.findPointsWithinRadiusOfRayWithFinger = function (ray, radius, finger) {
-//   const positions = this._enuCoords;
-//   const indexedTree = this._3DTree;
-//   let result;
-//   console.log("finger", this._finger);
-//   // if (this._finger.length === 0) {
-//     // console.log("this._finger.length === 0");
-//     const boundingBox = new Float64Array(6);
-//     boundingBox[0] = this._boxENU[0];
-//     boundingBox[1] = this._boxENU[1];
-//     boundingBox[2] = this._boxENU[2];
-//     boundingBox[3] = this._boxENU[3];
-//     boundingBox[4] = this._boxENU[4];
-//     boundingBox[5] = this._boxENU[5];
-//     const curNode = this._beginNode;
-//     const depth = 0;
-//     console.log("curNode", curNode, "depth", depth, "box", boundingBox);
-//     result = rayIterateFromFinger(
-//       indexedTree,
-//       positions,
-//       ray,
-//       [{boundingBox, curNode, depth}],
-//       radius
-//     );
-//   // } else {
-//   //   // we need to traverse the finger upward to find where to actually start
-//   //   console.log("this._finger.length > 0");
-//   //   while (this._finger.length > 1) {
-//   //     const nextParent = this._finger.pop();
-//   //     if (doesRayIntersectSphere(ray, boundingSphereOfBox(nextParent.boundingBox), radius)) {
-//   //       break;
-//   //     }
-//   //   }
-//   //   console.log("this._finger", this._finger);
-//   //   result = rayIterateFromFinger(
-//   //     indexedTree,
-//   //     positions,
-//   //     ray,
-//   //     this._finger,
-//   //     radius,
-//   //   );
-//   // }
 
-//   if (!result) {
-//     return null;
-//   }
-//   console.log("result", result);
-//   this._finger = result;
-//   const ecefTransformationMatrix = Transforms.eastNorthUpToFixedFrame(
-//     this._rtcCenterEcef
-//   );
-//   const resultNode = result.at(-1);
-//   const resultX = positions[resultNode.curNode * 3];
-//   const resultY = positions[resultNode.curNode * 3 + 1];
-//   const resultZ = positions[resultNode.curNode * 3 + 2];
-//   console.log("resultX", resultX, "resultY", resultY, "resultZ", resultZ);
-//   const ecef = matrixMultbyPointasVec(
-//     ecefTransformationMatrix,
-//     resultX,
-//     resultY,
-//     resultZ
-//   );
-//   return new Cartesian3(
-//     ecef[0] + this._rtcCenterEcef.x,
-//     ecef[1] + this._rtcCenterEcef.y,
-//     ecef[2] + this._rtcCenterEcef.z
-//   );
-// };
+function getPointFromHistory(positions, history) {
+  const finalNode = history[history.length - 1];
+  return new Float64Array([
+    positions[finalNode.curNode * 3],
+    positions[finalNode.curNode * 3 + 1],
+    positions[finalNode.curNode * 3 + 2],
+  ]);
+}
 
 function compareDistanceToRay(a, b, ray) {
   if (!a) {
@@ -988,122 +928,210 @@ function doesRayIntersectSphere(ray, sphere, searchRadius) {
   return distanceFromRayToPoint(ray, sphere[0]) <= sphere[1] + searchRadius;
 }
 
-// function rayIterateFromFinger(
-//   indexedTree,
-//   positions,
-//   ray,
-//   history,
-//   radius,
-// ) {
-//   const curEval = history.at(-1);
-//   const curNode = curEval.curNode;
-//   const depth = curEval.depth;
-//   const curBoundingBox = curEval.boundingBox;
+function checkSlab(origin, magnitude, min, max) {
+  const EPSILON = 1e-10;
 
-//   const axis = depth % 3;
-//   const curAxis = positions[curNode * 3 + axis];
-//   const curx = positions[curNode * 3];
-//   const cury = positions[curNode * 3 + 1];
-//   const curz = positions[curNode * 3 + 2];
-//   const curPoint = new Float64Array(3);
-//   curPoint[0] = curx;
-//   curPoint[1] = cury;
-//   curPoint[2] = curz;
-//   // console.log("rayIterateFromFinger", curNode, "depth",depth, boundingBoxHistory, "curPoint", curPoint);
+  // Handle ray parallel to slab
+  if (Math.abs(magnitude) < EPSILON) {
+    return origin >= min - EPSILON && origin <= max + EPSILON;
+  }
 
-//   if (history.length === 0) {
-//     // the desired ray does not intersect the point cloud
-//     // console.log("no bounding box history");
-//     return null;
-//   }
-//   const sphere = boundingSphereOfBox(curBoundingBox);
-//   let cur = null;
-//   // if the current bounding box does not intersect the ray, we need to try the parent.
+  let t1 = (min - origin) / magnitude;
+  let t2 = (max - origin) / magnitude;
 
-//   if (!doesRayIntersectSphere(ray, sphere, radius)) {
-//     return null;
-//   }
-//   // console.log("distanceFromRayToPoint", distanceFromRayToPoint(ray, curPoint), "radius", radius);
-//   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
-//     cur = curPoint;
-//   }
-//   const nextBoundingBox = Float64Array.from(curBoundingBox);
-//   const rightBound = curBoundingBox[2 * axis + 1];
-//   let left = null;
-//   let right = null;
-//   // Left
-//   if (indexedTree[curNode * 2] !== -1) {
-//     nextBoundingBox[2 * axis + 1] = curAxis;
-//     // console.log("leftBoundingBox", nextBoundingBox);
-//     const leftSphere = boundingSphereOfBox(nextBoundingBox);
-//     history.push({boundingBox: nextBoundingBox, curNode: indexedTree[curNode * 2], depth: depth + 1});
-//     if (doesRayIntersectSphere(ray, leftSphere, radius)) {
-//       left = rayIterateFromFinger(
-//         indexedTree,
-//         positions,
-//         ray,
-//         history,
-//         radius
-//       );
-//     }
-//     history.pop();
-//   }
+  // Ensure t1 is the near intersection and t2 is the far intersection
+  if (t1 > t2) {
+    const temp = t1;
+    t1 = t2;
+    t2 = temp;
+  }
 
-//   // Right
-//   if (indexedTree[curNode * 2 + 1] !== -1) {
-//     nextBoundingBox[2 * axis + 1] = rightBound;
-//     nextBoundingBox[2 * axis] = curAxis;
-//     // console.log("rightBoundingBox", nextBoundingBox);
-//     const rightSphere = boundingSphereOfBox(nextBoundingBox);
-//     history.push({boundingBox: nextBoundingBox, curNode: indexedTree[curNode * 2 + 1], depth: depth + 1});
-//     if (doesRayIntersectSphere(ray, rightSphere, radius)) {
-//       right = rayIterateFromFinger(
-//         indexedTree,
-//         positions,
-//         ray,
-//         history,
-//         radius
-//       );
-//     }
-//     history.pop();
-//   }
+  return { t1: t1, t2: t2 };
+}
 
-//   let leftPoint = new Float64Array(3);
-//   let rightPoint = new Float64Array(3);
-//   if (left) {
-//     // console.log("left", left.node);
-//     leftPoint[0] = positions[left.curNode * 3];
-//     leftPoint[1] = positions[left.curNode * 3 + 1];
-//     leftPoint[2] = positions[left.curNode * 3 + 2];
-//   }
-//   if (right) {
-//     // console.log("right", right.node);
-//     rightPoint[0] = positions[right.curNode * 3];
-//     rightPoint[1] = positions[right.curNode * 3 + 1];
-//     rightPoint[2] = positions[right.curNode * 3 + 2];
-//   }
-//   // console.log("cur", cur, "left", leftPoint, "right", rightPoint);
-//   const closestPoint = compareDistanceToRay(cur, compareDistanceToRay(leftPoint, rightPoint, ray), ray);
-//   if (closestPoint === cur) {
-//     // console.log("closest point is cur:");
-//     return history;
-//   } else if (closestPoint === leftPoint) {
-//     return left;
-//   } else {
-//     return right;
-//   }
-// }
+function doesRayIntersectBox(ray, box) {
+  const origin = new Float64Array([ray.origin.x, ray.origin.y, ray.origin.z]);
+  const direction = new Float64Array([ray.direction.x, ray.direction.y, ray.direction.z]);
 
+  let tMin = -Infinity;
+  let tMax = Infinity;
+
+  // Check each axis (X=0, Y=1, Z=2)
+  for (let axis = 0; axis < 3; axis++) {
+    const result = checkSlab(origin[axis], direction[axis], box[axis * 2], box[axis * 2 + 1]);
+
+    // If parallel to slab and outside bounds, no intersection
+    if (result === false) {
+      return false;
+    }
+
+    // If we got intersection times back, update tMin and tMax
+    if (typeof result === 'object') {
+      tMin = Math.max(tMin, result.t1);
+      tMax = Math.min(tMax, result.t2);
+
+      if (tMin > tMax) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+// Helper function to compare arrays
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i++) {
+    if (Math.abs(a[i] - b[i]) > Number.EPSILON) return false;
+  }
+  return true;
+}
+
+let SAMPLE_INTERVAL = 10000;
+let fingerQueries = 0;
+let fingerPeriodQueriesWithFinger = 0;
+let fingerPeriodFingerRemovals = 0;
+let fingerPeriodFingerLength = 0;
+let fingerPeriodHits = 0;
+let fingerPeriodResultLength = 0;
+let periodHits = 0;
+let periodResultLength = 0;
+let cumulativeQueriesWithFinger = 0;
+
+let periodQueriesWithFinger = 0;
+
+
+function proceedToTail(history, indexedTree) {
+  let describeChoices = [];
+  for (let i = 0; i < history.length - 1; i++) {
+    const node = history[i];
+    const curNode = node.curNode;
+    const leftChild = indexedTree[curNode * 2];
+    const rightChild = indexedTree[curNode * 2 + 1];
+    if (leftChild === history[i + 1].curNode) {
+      describeChoices.push("left");
+    } else if (rightChild === history[i + 1].curNode) {
+      describeChoices.push("right");
+    } else {
+      describeChoices.push("none");
+    }
+  }
+  return describeChoices;
+}
+
+function getLCA(a, b, indexedTree, positions, ray) {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      const aNode = a[i];
+      const bNode = b[i];
+      if (aNode.curNode !== bNode.curNode) {
+        return i;
+      }
+    }
+    return Math.min(a.length, b.length);
+  }
+  if (Array.isArray(a) && !Array.isArray(b)) {
+    return a.length;
+  }
+  if (!Array.isArray(a) && Array.isArray(b)) {
+    return b.length;
+  }
+  return Math.Infinity;
+}
+
+let timesWeNeedToBack = 0;
+let howFarShouldWeBack = 0;
 PntsLoader.prototype.findPointsWithinRadiusOfRayWithFinger = function (
   ray,
-  radius
+  radius,
+  verbose,
+  uri
 ) {
   const positions = this._enuCoords;
   const indexedTree = this._3DTree;
   let result;
+  fingerQueries++;
 
-  // Always start with initial bounding box if finger is empty or invalid
-  if (this._finger.length === 0) {
+  let printLCA = true;
+ 
+  if (this._finger.length > 1) {
+    periodQueriesWithFinger++;
+    cumulativeQueriesWithFinger++;
+    fingerPeriodFingerLength += this._finger.length;
+    let removalThisQuery = 0;
+
+    // Start from existing finger, and re-wind history until we find a node that intersects the ray
+    while (this._finger.length > 1 && !result) {
+      const lastNode = this._finger.at(-1);
+      if (
+        doesRayIntersectBox(
+          ray,
+          lastNode.boundingBox,
+        )
+      ) {
+        result = rayIterateFromFinger(indexedTree, positions, ray, this._finger, radius);
+      }
+      if (!result){
+        let currentNodeParent = this._finger.at(-2);
+        if (currentNodeParent){
+          let leftChild = indexedTree[currentNodeParent.curNode * 2];
+          let rightChild = indexedTree[currentNodeParent.curNode * 2 + 1];
+          let axis = currentNodeParent.depth % 3;
+          // console.log("currentNodeDepth", currentNodeParent.depth, "currentNode", this._finger.at(-1).curNode, "currentNodeParent", currentNodeParent.curNode, "leftChild of parent", leftChild, "rightChild of parent", rightChild);
+          if (leftChild === this._finger.at(-1).curNode && rightChild !== -1){
+            // console.log("checking right child because left child");
+            // we want to check the right child
+            let rightChildBoundingBox = Float64Array.from(currentNodeParent.boundingBox);
+            rightChildBoundingBox[2 * axis] = currentNodeParent.curNode;
+            let rightChildHistory = this._finger.slice(0, -1).concat([{
+              boundingBox: rightChildBoundingBox,
+              curNode: rightChild,
+              depth: currentNodeParent.depth + 1,
+            }]);
+            result = rayIterateFromFinger(indexedTree, positions, ray, rightChildHistory, radius);
+          } else if (rightChild === this._finger.at(-1).curNode && leftChild !== -1){
+            // console.log("checking left child because right child");
+            const leftChildBoundingBox = Float64Array.from(currentNodeParent.boundingBox);
+            leftChildBoundingBox[2 * axis + 1] = currentNodeParent.curNode;
+            const leftChildHistory = this._finger.slice(0, -1).concat([{
+              boundingBox: leftChildBoundingBox,
+              curNode: leftChild,
+              depth: currentNodeParent.depth + 1,
+            }]);
+            result = rayIterateFromFinger(indexedTree, positions, ray, leftChildHistory, radius);
+            // we want to check the left child
+          }
+        } else {
+          break;
+        }
+      }
+      this._finger.pop();
+      fingerPeriodFingerRemovals++;
+      removalThisQuery++;
+    }
+    
+    if (result) {
+      fingerPeriodHits++;
+    }
+    if (cumulativeQueriesWithFinger % SAMPLE_INTERVAL === 0) {
+      console.log(`Finger queries: ${fingerQueries}, 
+        Finger length: ${fingerPeriodFingerLength / SAMPLE_INTERVAL}, 
+        Finger removals: ${fingerPeriodFingerRemovals / SAMPLE_INTERVAL}, 
+        hit rate: ${fingerPeriodHits / SAMPLE_INTERVAL}, 
+        result length: ${fingerPeriodResultLength / SAMPLE_INTERVAL}`);
+      fingerPeriodFingerLength = 0;
+      fingerPeriodFingerRemovals = 0;
+      fingerPeriodResultLength = 0;
+      fingerPeriodHits = 0;
+    }
+  } else {
+    if (verbose){
+      console.log("no finger, using traditional result");
+    }
+
     const boundingBox = new Float64Array(6);
     boundingBox[0] = this._boxENU[0];
     boundingBox[1] = this._boxENU[1];
@@ -1111,7 +1139,8 @@ PntsLoader.prototype.findPointsWithinRadiusOfRayWithFinger = function (
     boundingBox[3] = this._boxENU[3];
     boundingBox[4] = this._boxENU[4];
     boundingBox[5] = this._boxENU[5];
-
+  
+  
     result = rayIterateFromFinger(
       indexedTree,
       positions,
@@ -1125,47 +1154,26 @@ PntsLoader.prototype.findPointsWithinRadiusOfRayWithFinger = function (
       ],
       radius
     );
-  } else {
-    // Start from existing finger, but verify it's still valid
-    while (this._finger.length > 1) {
-      const lastNode = this._finger.pop();
-      if (
-        doesRayIntersectSphere(
-          ray,
-          boundingSphereOfBox(lastNode.boundingBox),
-          radius
-        )
-      ) {
-        break;
-      }
-    }
-    if (this._finger.length === 0) {
-      return console.log("removed too many!");
-    }
-    result = rayIterateFromFinger(
-      indexedTree,
-      positions,
-      ray,
-      this._finger,
-      radius
-    );
+  
   }
+
+  if (fingerQueries % SAMPLE_INTERVAL === 0) {
+    periodHits = 0;
+    periodResultLength = 0;
+    periodQueriesWithFinger = 0;
+  }
+
 
   if (!result) {
     return null;
   }
-
+  periodHits++;
+  periodResultLength += result.length;
   // Update finger with new path
   this._finger = result;
 
   // Convert result point to ECEF coordinates
-  const resultNode = result[result.length - 1];
-  const point = new Float64Array([
-    positions[resultNode.curNode * 3],
-    positions[resultNode.curNode * 3 + 1],
-    positions[resultNode.curNode * 3 + 2],
-  ]);
-
+  const point = getPointFromHistory(positions, result);
   const ecefTransformationMatrix = Transforms.eastNorthUpToFixedFrame(
     this._rtcCenterEcef
   );
@@ -1198,17 +1206,17 @@ function rayIterateFromFinger(indexedTree, positions, ray, history, radius) {
   ]);
   const curAxis = curPoint[axis];
 
-  // Check if current node's bounding sphere intersects ray
-  if (
-    !doesRayIntersectSphere(ray, boundingSphereOfBox(curBoundingBox), radius)
-  ) {
-    return null;
-  }
-
   // Check if current point is within radius of ray
   let bestResult = null;
   if (distanceFromRayToPoint(ray, curPoint) <= radius) {
     bestResult = history;
+  }
+
+  // Check if current node's bounding sphere intersects ray
+  if (
+    !doesRayIntersectBox(ray, curBoundingBox)
+  ) {
+    return null;
   }
 
   // Check left child
@@ -1239,10 +1247,10 @@ function rayIterateFromFinger(indexedTree, positions, ray, history, radius) {
           ray,
           getPointFromHistory(positions, leftResult)
         ) <
-          distanceFromRayToPoint(
-            ray,
-            getPointFromHistory(positions, bestResult)
-          ))
+        distanceFromRayToPoint(
+          ray,
+          getPointFromHistory(positions, bestResult)
+        ))
     ) {
       bestResult = leftResult;
     }
@@ -1276,10 +1284,10 @@ function rayIterateFromFinger(indexedTree, positions, ray, history, radius) {
           ray,
           getPointFromHistory(positions, rightResult)
         ) <
-          distanceFromRayToPoint(
-            ray,
-            getPointFromHistory(positions, bestResult)
-          ))
+        distanceFromRayToPoint(
+          ray,
+          getPointFromHistory(positions, bestResult)
+        ))
     ) {
       bestResult = rightResult;
     }
@@ -1288,15 +1296,7 @@ function rayIterateFromFinger(indexedTree, positions, ray, history, radius) {
   return bestResult;
 }
 
-// Helper function to get point from history
-function getPointFromHistory(positions, history) {
-  const node = history[history.length - 1].curNode;
-  return new Float64Array([
-    positions[node * 3],
-    positions[node * 3 + 1],
-    positions[node * 3 + 2],
-  ]);
-}
+
 
 function rayIterate(
   indexedTree,
@@ -1506,7 +1506,7 @@ function matrixMultbyPointasVec(matrix, vX, vY, vZ) {
   return enu;
 }
 
-PntsLoader.prototype.drillPickWithRay = function (ray) {};
+PntsLoader.prototype.drillPickWithRay = function (ray) { };
 
 function addPropertyAttributesToPrimitive(
   loader,

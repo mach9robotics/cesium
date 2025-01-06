@@ -2538,7 +2538,7 @@ function executeCommands(scene, passState) {
       us.updatePass(Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW);
       commands =
         frustumCommands.commands[
-          Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW
+        Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW
         ];
       length =
         frustumCommands.indices[Pass.CESIUM_3D_TILE_CLASSIFICATION_IGNORE_SHOW];
@@ -3219,7 +3219,7 @@ Scene.prototype.updateEnvironment = function () {
 
   const occluder =
     frameState.mode === SceneMode.SCENE3D &&
-    !globeTranslucencyState.sunVisibleThroughGlobe
+      !globeTranslucencyState.sunVisibleThroughGlobe
       ? frameState.occluder
       : undefined;
   let cullingVolume = frameState.cullingVolume;
@@ -4141,13 +4141,13 @@ function rayEcefToEnu(reference, direction) {
  * @param {Ray} ray
  * @param {number} radius
  */
-function getRayIntersectionWithTile(tile, ray, radius) {
+function getRayIntersectionWithTileWithFinger(tile, ray, radius, verbose, uri) {
   if (
     !tile.content ||
     !tile.content._model ||
     !tile.content._model._loader._rtcCenterEcef
   ) {
-    return null;
+    return -1;
   }
   const origin = pointEcefToEnu(
     tile._content._model._loader._rtcCenterEcef,
@@ -4160,6 +4160,32 @@ function getRayIntersectionWithTile(tile, ray, radius) {
   const enuRay = new Ray(origin, direction);
   const result = tile.content._model._loader.findPointsWithinRadiusOfRayWithFinger(
     enuRay,
+    radius,
+    verbose,
+    uri
+  );
+  return result;
+}
+
+function getRayIntersectionWithTile(tile, ray, radius) {
+  if (
+    !tile.content ||
+    !tile.content._model ||
+    !tile.content._model._loader._rtcCenterEcef
+  ) {
+    return -1;
+  }
+  const origin = pointEcefToEnu(
+    tile._content._model._loader._rtcCenterEcef,
+    ray.origin
+  );
+  const direction = rayEcefToEnu(
+    tile.content._model._loader._rtcCenterEcef,
+    ray.direction
+  );
+  const enuRay = new Ray(origin, direction);
+  const result = tile.content._model._loader.findPointsWithinRadiusOfRay(
+    enuRay,
     radius
   );
   return result;
@@ -4168,10 +4194,49 @@ function getRayIntersectionWithTile(tile, ray, radius) {
 function rayIntersection(tileset, ray, radius) {
   let minDist = Infinity;
   let bestIntersection;
+  let unableToCheckCount = 0;
   for (const tile of tileset) {
     const intersectionWithTile = getRayIntersectionWithTile(tile, ray, radius);
-    if (intersectionWithTile) {
+    if (intersectionWithTile === -1) {
+      unableToCheckCount++;
+    }
+    if (intersectionWithTile && intersectionWithTile !== -1) {
       const dist = distanceFromRayToPoint(ray, intersectionWithTile);
+      if (dist < minDist) {
+        const content = tile._content;
+        minDist = dist;
+        bestIntersection = [intersectionWithTile, content, tile._tileset];
+        if (tile._header.content.uri !== 'root.b3dm') {
+          // console.log('improving to:', tile._header.content.uri);
+        }
+      }
+    }
+  }
+  // console.log("actually could check:", (tileset.length - unableToCheckCount) / tileset.length);
+  return bestIntersection;
+}
+
+let previousTileset = new Set();
+function rayIntersectionWithFinger(tileset, ray, radius) {
+  let minDist = Infinity;
+  let bestIntersection;
+  let unableToCheckCount = 0;
+  let intersections = [];
+  for (const tile of tileset) {
+    // let verbose = tile._header?.content?.uri === '3-3-5-2.pnts';
+    // if (verbose) {
+    //   console.log("verbose", verbose, "tile:", tile._header.content.uri);
+    // }
+
+    const intersectionWithTile = getRayIntersectionWithTileWithFinger(tile, ray, radius, false, tile?._header?.content?.uri);
+    if (intersectionWithTile === -1) {
+      unableToCheckCount++;
+    }
+    if (intersectionWithTile && intersectionWithTile !== -1) {
+      const dist = distanceFromRayToPoint(ray, intersectionWithTile);
+      if (tile._header?.content?.uri) {
+        intersections.push([tile._header?.content?.uri, intersectionWithTile, dist]);
+      }
       if (dist < minDist) {
         const content = tile._content;
         minDist = dist;
@@ -4179,6 +4244,7 @@ function rayIntersection(tileset, ray, radius) {
       }
     }
   }
+  // console.log("intersections", intersections);
   return bestIntersection;
 }
 
@@ -4234,7 +4300,7 @@ function getRayFittingTiles(root, ray, radius, finger) {
           distanceFromRayToPoint(ray, child.boundingSphere.center) <
           radius + child.boundingSphere.radius
         ) {
-          queue.push(child);
+          queue.unshift(child);
         }
       }
       fittingTiles.push(curTile);
@@ -4278,21 +4344,23 @@ Scene.prototype.drillPickFromRayFast = function (ray, width) {
   ];
 };
 
-// we cache the intersection of the ray with the tileset at this layer; the finger stores the tileset of interest
+/**
+ * Returns the best pick location against all the cesium3D Tilesets in the scene.
+ *
+ * @param {Ray} ray
+ * @param {number} width
+ */
 Scene.prototype.drillPickFromRayFastWithFinger = function (ray, width) {
   let bestIntersection;
   let minDist = Infinity;
 
+  // iterate through all the valid Cesium3dTilesets, and evaluate picking against them
   for (const tile of this.primitives._primitives) {
-    // console.log("tile", tile)
     if (tile instanceof Cesium3DTileset) {
-      // const searchTiles = tile._drillPickFinger.length > 0 ? tile._drillPickFinger : [tile.root];
-      // // determine the tiles of the Cesium3DTileset that could be intersected by the ray
-      // console.log('search tiles', searchTiles)
-      // const tileset = getRayFittingTilesWithFinger(searchTiles, ray, width);
-      // tile._drillPickFinger = tileset;
-      const tileset = getRayFittingTiles(tile.root, ray, width);
-      const intersection = rayIntersection(tileset, ray, width);
+      const root_tile = tile.root;
+      // determine the tiles of the Cesium3DTileset that could be intersected by the ray
+      const tileset = getRayFittingTiles(root_tile, ray, width);
+      const intersection = rayIntersectionWithFinger(tileset, ray, width);
       if (intersection) {
         const dist = distanceFromRayToPoint(ray, intersection[0]);
         if (dist < minDist) {
@@ -4302,7 +4370,6 @@ Scene.prototype.drillPickFromRayFastWithFinger = function (ray, width) {
       }
     }
   }
-
   if (!bestIntersection) {
     return undefined;
   }
